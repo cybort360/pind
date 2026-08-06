@@ -95,10 +95,10 @@ async function attachProjectChildren(
   if (ids.length === 0) return [];
 
   const [milestones, revisions, comments, decisions, tokens] = await Promise.all([
-    db.query(`SELECT * FROM milestones WHERE project_id = ANY($1) ORDER BY position ASC`, [ids]),
+    db.query(`SELECT * FROM milestones WHERE project_id = ANY($1) ORDER BY position ASC, id ASC`, [ids]),
     db.query(`SELECT * FROM revisions WHERE project_id = ANY($1) ORDER BY version ASC`, [ids]),
-    db.query(`SELECT * FROM comments WHERE project_id = ANY($1) ORDER BY created_at DESC`, [ids]),
-    db.query(`SELECT * FROM decisions WHERE project_id = ANY($1) ORDER BY created_at DESC`, [ids]),
+    db.query(`SELECT * FROM comments WHERE project_id = ANY($1) ORDER BY created_at DESC, id DESC`, [ids]),
+    db.query(`SELECT * FROM decisions WHERE project_id = ANY($1) ORDER BY created_at DESC, id DESC`, [ids]),
     db.query(
       `SELECT project_id, token FROM review_tokens
        WHERE project_id = ANY($1) AND revoked_at IS NULL
@@ -147,21 +147,21 @@ export async function readAppState(db: Queryable, workspaceId: string): Promise<
          WHERE p.client_id = c.id AND p.status <> 'approved'
        ) AS active_projects
        FROM clients c WHERE c.workspace_id = $1
-       ORDER BY c.created_at DESC, c.id`,
+       ORDER BY c.last_active_at DESC, c.id ASC`,
       [workspaceId],
     ),
     db.query(
       `SELECT p.*, c.company AS client_name FROM projects p
        JOIN clients c ON c.id = p.client_id
-       WHERE p.workspace_id = $1 ORDER BY p.updated_at DESC`,
+       WHERE p.workspace_id = $1 ORDER BY p.updated_at DESC, p.id ASC`,
       [workspaceId],
     ),
     db.query(
-      `SELECT * FROM activities WHERE workspace_id = $1 ORDER BY created_at DESC LIMIT $2`,
+      `SELECT * FROM activities WHERE workspace_id = $1 ORDER BY created_at DESC, id DESC LIMIT $2`,
       [workspaceId, ACTIVITY_LIMIT],
     ),
     db.query(
-      `SELECT * FROM notifications WHERE workspace_id = $1 ORDER BY created_at DESC LIMIT $2`,
+      `SELECT * FROM notifications WHERE workspace_id = $1 ORDER BY created_at DESC, id DESC LIMIT $2`,
       [workspaceId, NOTIFICATION_LIMIT],
     ),
   ]);

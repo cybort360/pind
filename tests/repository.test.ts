@@ -64,4 +64,40 @@ describe('readAppState', () => {
       ),
     ).rejects.toMatchObject({ code: '23505' });
   });
+
+  it('orders clients by last_active_at descending, not created_at', async () => {
+    const state = (await readAppState(pool, DEMO_WORKSPACE_ID))!;
+    expect(state.clients.map((client) => client.id)).toEqual([
+      'client-ember', 'client-loom', 'client-field', 'client-sonder',
+    ]);
+  });
+
+  it('orders comments newest-first, with a stable tiebreak for same-timestamp comments', async () => {
+    const state = (await readAppState(pool, DEMO_WORKSPACE_ID))!;
+    const ember = state.projects.find((project) => project.id === 'project-ember-packaging')!;
+    // comment-ember-1 and comment-ember-2 share created_at; id DESC keeps
+    // comment-ember-2 first. comment-ember-3 is newest overall.
+    expect(ember.comments.map((comment) => comment.id)).toEqual([
+      'comment-ember-3', 'comment-ember-2', 'comment-ember-1',
+    ]);
+  });
+
+  it('returns identically-ordered arrays across repeated calls (regression guard for unspecified tie order)', async () => {
+    const first = (await readAppState(pool, DEMO_WORKSPACE_ID))!;
+    const second = (await readAppState(pool, DEMO_WORKSPACE_ID))!;
+
+    expect(first.clients.map((client) => client.id)).toEqual(second.clients.map((client) => client.id));
+    expect(first.projects.map((project) => project.id)).toEqual(second.projects.map((project) => project.id));
+    expect(first.activities.map((activity) => activity.id)).toEqual(
+      second.activities.map((activity) => activity.id),
+    );
+    expect(first.notifications.map((notification) => notification.id)).toEqual(
+      second.notifications.map((notification) => notification.id),
+    );
+    for (let i = 0; i < first.projects.length; i++) {
+      expect(first.projects[i].comments.map((comment) => comment.id)).toEqual(
+        second.projects[i].comments.map((comment) => comment.id),
+      );
+    }
+  });
 });
