@@ -905,7 +905,7 @@ DATABASE_URL=postgres://localhost:5432/pind npm run db:seed
 psql -d pind -c "SELECT (SELECT COUNT(*) FROM projects) AS projects, (SELECT COUNT(*) FROM clients) AS clients, (SELECT COUNT(*) FROM comments) AS comments;"
 ```
 
-Expected: first run prints `seeded`, the next two print `already present`; counts are exactly `4 | 4 | 3`.
+Expected: first run prints `seeded`, the next two print `already present`; counts are exactly `4 | 4 | 5` (3 comments on Summer Packaging + 2 on Autumn Editorial).
 
 - [ ] **Step 8: Commit**
 
@@ -2182,7 +2182,7 @@ confirm rows land in Postgres after each one:
 | Request changes | `POST /api/review/:token/decision` | `decisions` +1, project `status='changes-requested'` |
 | Approve | `POST /api/review/:token/decision` | project `status='approved'`, `progress=100`, milestone advanced |
 | Receipt | read the decision | `receipt_code` matches `^PND-[A-Z]*-[A-Z0-9]{6}$` |
-| Reset demo | `POST /api/demo/reset` | counts return to 4/4/3 |
+| Reset demo | `POST /api/demo/reset` | counts return to 4 projects / 4 clients / 5 comments |
 
 - [ ] **Step 8: Verify every route in a browser, dev and production**
 
