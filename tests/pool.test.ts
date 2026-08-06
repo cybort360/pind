@@ -48,4 +48,16 @@ describe('resolveSsl', () => {
   it('defaults to verifying when the connection string is not a parseable URL', () => {
     expect(resolveSsl('host=localhost port=5432 dbname=pind')).toEqual({ rejectUnauthorized: true });
   });
+
+  it('disables TLS for uppercase LOCALHOST (postgres: is a non-special scheme, so the URL parser does not lowercase the host)', () => {
+    expect(resolveSsl('postgres://LOCALHOST:5432/pind')).toBe(false);
+  });
+
+  it('disables TLS for mixed-case host variants', () => {
+    expect(resolveSsl('postgres://LocalHost/pind')).toBe(false);
+  });
+
+  it('disables TLS for a unix-domain socket DSN with an empty hostname', () => {
+    expect(resolveSsl('postgresql:///pind?host=/var/run/postgresql')).toBe(false);
+  });
 });

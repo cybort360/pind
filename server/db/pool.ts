@@ -43,7 +43,14 @@ export function resolveSsl(connectionString: string): false | { rejectUnauthoriz
     // what's compared against local hosts rather than a substring that could
     // appear in the userinfo segment (e.g. a password containing "@localhost").
     const { hostname } = new URL(connectionString);
-    isLocal = LOCAL_HOSTNAMES.has(hostname);
+    // `postgres:`/`postgresql:` are non-special URL schemes, so unlike
+    // `http(s):` WHATWG parsing does NOT lowercase the host — compare
+    // case-insensitively so e.g. "LOCALHOST" is still recognized as local.
+    const normalizedHostname = hostname.toLowerCase();
+    // An empty hostname (e.g. "postgresql:///pind?host=/var/run/postgresql")
+    // means the DSN targets a unix-domain socket via the `host` query param,
+    // which is inherently local and never uses TLS.
+    isLocal = normalizedHostname === '' || LOCAL_HOSTNAMES.has(normalizedHostname);
   } catch {
     // Not a parseable URL (e.g. a libpq key/value DSN like
     // "host=localhost port=5432"). Default to verifying rather than
