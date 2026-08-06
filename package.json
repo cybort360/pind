@@ -14,7 +14,10 @@
     "start": "NODE_ENV=production node dist-server/server/index.js",
     "check": "tsc --noEmit && tsc -p tsconfig.server.json --noEmit",
     "test": "vitest run",
-    "seed": "tsx server/seed.ts"
+    "seed": "tsx server/seed.ts",
+    "db:migrate": "tsx server/db/migrate.ts",
+    "db:seed": "tsx server/seed.ts",
+    "db:reset": "tsx server/seed.ts --reset"
   },
   "dependencies": {
     "cloudinary": "2.7.0",
