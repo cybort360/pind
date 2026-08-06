@@ -26,6 +26,8 @@ export function getPool(): pg.Pool {
   return pool;
 }
 
+const LOCAL_HOSTNAMES = new Set(['localhost', '127.0.0.1', '[::1]']);
+
 /**
  * Local sockets run without TLS. Everything else verifies the server
  * certificate by default. Some managed providers present a chain Node cannot
@@ -34,7 +36,22 @@ export function getPool(): pg.Pool {
  * everyone, which would expose every deployment to MITM.
  */
 export function resolveSsl(connectionString: string): false | { rejectUnauthorized: boolean } {
-  if (/@(localhost|127\.0\.0\.1)[:/]/.test(connectionString)) return false;
+  let isLocal = false;
+  try {
+    // Use WHATWG URL parsing (same rules `pg`/`pg-connection-string` apply)
+    // instead of regex-matching the raw string, so the parsed `hostname` is
+    // what's compared against local hosts rather than a substring that could
+    // appear in the userinfo segment (e.g. a password containing "@localhost").
+    const { hostname } = new URL(connectionString);
+    isLocal = LOCAL_HOSTNAMES.has(hostname);
+  } catch {
+    // Not a parseable URL (e.g. a libpq key/value DSN like
+    // "host=localhost port=5432"). Default to verifying rather than
+    // guessing it's local — the safe direction when we can't be sure.
+    isLocal = false;
+  }
+
+  if (isLocal) return false;
   if (process.env.DATABASE_SSL_NO_VERIFY === 'true') {
     console.warn('DATABASE_SSL_NO_VERIFY=true — TLS certificate verification is disabled for Postgres.');
     return { rejectUnauthorized: false };

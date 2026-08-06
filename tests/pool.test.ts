@@ -20,6 +20,14 @@ describe('resolveSsl', () => {
     expect(resolveSsl('postgres://user@127.0.0.1:5432/pind')).toBe(false);
   });
 
+  it('disables TLS for credential-less localhost connection strings', () => {
+    expect(resolveSsl('postgres://localhost:5432/pind')).toBe(false);
+  });
+
+  it('disables TLS for credential-less 127.0.0.1 connection strings', () => {
+    expect(resolveSsl('postgres://127.0.0.1/pind')).toBe(false);
+  });
+
   it('verifies certificates for remote databases by default', () => {
     expect(resolveSsl('postgres://user:pw@db.example.com:5432/pind')).toEqual({ rejectUnauthorized: true });
   });
@@ -31,5 +39,13 @@ describe('resolveSsl', () => {
 
   it('does not treat a remote host containing "localhost" as local', () => {
     expect(resolveSsl('postgres://user:pw@localhost.evil.com:5432/pind')).toEqual({ rejectUnauthorized: true });
+  });
+
+  it('uses the last "@" as the userinfo/host boundary, not a "@localhost" substring in userinfo', () => {
+    expect(resolveSsl('postgres://user:pass@localhost:1@evil.com:5432/db')).toEqual({ rejectUnauthorized: true });
+  });
+
+  it('defaults to verifying when the connection string is not a parseable URL', () => {
+    expect(resolveSsl('host=localhost port=5432 dbname=pind')).toEqual({ rejectUnauthorized: true });
   });
 });
