@@ -1,10 +1,14 @@
 import type { AppState } from '../shared/types.js';
 
-const now = new Date('2026-08-06T12:00:00.000Z');
-const isoDaysAgo = (days: number, hours = 0) => new Date(now.getTime() - (days * 24 + hours) * 60 * 60 * 1000).toISOString();
-const isoDaysAhead = (days: number) => new Date(now.getTime() + days * 24 * 60 * 60 * 1000).toISOString();
+export const DEMO_WORKSPACE_ID = 'workspace-northstar';
 
-export const seedState: AppState = {
+export function buildSeed(now: Date = new Date()): AppState {
+  const isoDaysAgo = (days: number, hours = 0) =>
+    new Date(now.getTime() - (days * 24 + hours) * 60 * 60 * 1000).toISOString();
+  const isoDaysAhead = (days: number) =>
+    new Date(now.getTime() + days * 24 * 60 * 60 * 1000).toISOString();
+
+  return {
   schemaVersion: 1,
   workspace: {
     name: 'Northstar Creative',
@@ -409,4 +413,8 @@ export const seedState: AppState = {
       projectId: 'project-ember-menu',
     },
   ],
-};
+  };
+}
+
+/** Back-compat export used by the existing seed assertions. */
+export const seedState: AppState = buildSeed(new Date('2026-08-06T12:00:00.000Z'));
