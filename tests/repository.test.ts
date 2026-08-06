@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type pg from 'pg';
-import { readAppState } from '../server/db/assemble';
+import { readAppState, readReviewPayload } from '../server/db/assemble';
 import { seedWorkspace } from '../server/db/seed';
 import { DEMO_WORKSPACE_ID } from '../server/seed-data';
 import { truncateAll, withTestDatabase } from './helpers/db';
@@ -98,6 +98,51 @@ describe('readAppState', () => {
       expect(first.projects[i].comments.map((comment) => comment.id)).toEqual(
         second.projects[i].comments.map((comment) => comment.id),
       );
+    }
+  });
+});
+
+describe('readReviewPayload', () => {
+  const token = 'ember-summer-7k9qA4mT8vR2xP6cN1';
+
+  it('returns only the token’s own project', async () => {
+    const payload = (await readReviewPayload(pool, token))!;
+    expect(payload.project.id).toBe('project-ember-packaging');
+    expect(payload.workspace.name).toBe('Northstar Creative');
+    expect(payload.client?.company).toBe('Ember Coffee');
+    // The payload must not carry any workspace-wide collections.
+    expect(payload).not.toHaveProperty('projects');
+    expect(payload).not.toHaveProperty('clients');
+    expect(payload).not.toHaveProperty('activities');
+    expect(payload).not.toHaveProperty('notifications');
+    expect(Object.keys(payload).sort()).toEqual(['client', 'project', 'workspace']);
+  });
+
+  it('loads the project’s revisions and comments', async () => {
+    const payload = (await readReviewPayload(pool, token))!;
+    expect(payload.project.revisions).toHaveLength(3);
+    expect(payload.project.comments.every((comment) => comment.projectId === 'project-ember-packaging')).toBe(true);
+  });
+
+  it('returns null for an unknown token', async () => {
+    expect(await readReviewPayload(pool, 'not-a-real-token')).toBeNull();
+  });
+
+  it('returns null once the token is revoked', async () => {
+    await pool.query(`UPDATE review_tokens SET revoked_at = NOW() WHERE token = $1`, [token]);
+    try {
+      expect(await readReviewPayload(pool, token)).toBeNull();
+    } finally {
+      await pool.query(`UPDATE review_tokens SET revoked_at = NULL WHERE token = $1`, [token]);
+    }
+  });
+
+  it('returns null once the token has expired', async () => {
+    await pool.query(`UPDATE review_tokens SET expires_at = NOW() - INTERVAL '1 day' WHERE token = $1`, [token]);
+    try {
+      expect(await readReviewPayload(pool, token)).toBeNull();
+    } finally {
+      await pool.query(`UPDATE review_tokens SET expires_at = NULL WHERE token = $1`, [token]);
     }
   });
 });

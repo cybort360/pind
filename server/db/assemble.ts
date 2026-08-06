@@ -1,6 +1,6 @@
 import type {
   Activity, AppState, Client, Comment, Decision, Milestone,
-  Notification, Project, Revision, WorkspaceSettings,
+  Notification, Project, ReviewPayload, Revision, WorkspaceSettings,
 } from '../../shared/types.js';
 import { type Queryable, groupBy, iso, isoOrUndefined } from './rows.js';
 
@@ -190,6 +190,52 @@ export async function readAppState(db: Queryable, workspaceId: string): Promise<
       projectId: row.project_id ?? undefined,
       createdAt: iso(row.created_at),
     })),
+  };
+}
+
+/**
+ * Loads exactly one project by review token.
+ *
+ * The public review portal must never see workspace-wide data, so this never
+ * touches the clients, projects, activities, or notifications collections —
+ * only the token's own project, its client, and the workspace branding.
+ */
+export async function readReviewPayload(db: Queryable, token: string): Promise<ReviewPayload | null> {
+  const result = await db.query(
+    `SELECT p.*, c.company AS client_name FROM review_tokens t
+     JOIN projects p ON p.id = t.project_id
+     JOIN clients c ON c.id = p.client_id
+     WHERE t.token = $1
+       AND t.revoked_at IS NULL
+       AND (t.expires_at IS NULL OR t.expires_at > NOW())`,
+    [token],
+  );
+  if (result.rowCount === 0) return null;
+
+  const projectRow = result.rows[0];
+  const [projects, workspace, client] = await Promise.all([
+    attachProjectChildren(db, [projectRow]),
+    db.query(`SELECT * FROM workspaces WHERE id = $1`, [projectRow.workspace_id]),
+    db.query(
+      `SELECT c.*, (
+         SELECT COUNT(*)::int FROM projects p
+         WHERE p.client_id = c.id AND p.status <> 'approved'
+       ) AS active_projects
+       FROM clients c WHERE c.id = $1`,
+      [projectRow.client_id],
+    ),
+  ]);
+
+  // Audit trail. Awaited rather than fire-and-forget: `db` may be a checked-out
+  // client, and issuing an unawaited query on one interleaves with whatever the
+  // caller runs next on the same connection.
+  await db.query(`UPDATE review_tokens SET last_used_at = NOW() WHERE token = $1`, [token])
+    .catch((error) => console.error('Could not record review token use', error));
+
+  return {
+    project: projects[0],
+    workspace: toWorkspace(workspace.rows[0]),
+    client: client.rows[0] ? toClient(client.rows[0]) : undefined,
   };
 }
 
