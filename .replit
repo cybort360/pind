@@ -6,6 +6,8 @@ entrypoint = "server/index.ts"
 channel = "stable-24_05"
 
 [env]
+# DATABASE_URL is required and is injected by the Replit Database tool
+# (open it and click Create). The server migrates and seeds on boot.
 # Public port shared by the Vite dev server and the production Express server.
 PORT = "5000"
 # Private port the Express API listens on in development; Vite proxies to it.

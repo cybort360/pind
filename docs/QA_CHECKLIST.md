@@ -43,8 +43,9 @@ The health response should report `ok: true`, the active repository mode, four s
 
 ## Integration workflow
 
-- With no credentials, verify local JSON persistence and local uploads work.
-- Add `DATABASE_URL`, restart, and verify Settings reports the database as connected.
+- With `DATABASE_URL` unset, verify the server exits with the setup message instead of starting.
+- Against an empty database, verify the first boot applies migrations, seeds the demo workspace, and reports the database as connected in Settings.
+- With no optional credentials, verify local uploads still work.
 - Add Cloudinary credentials and verify a new revision stores a hosted URL.
 - Add Resend credentials and a verified sender, then send a review invitation.
 - Add `SLACK_WEBHOOK_URL`, capture a decision, and verify the team notification arrives.

@@ -18,7 +18,7 @@
 
 ## Connect services
 
-- [ ] Add `DATABASE_URL` for durable state.
+- [ ] Create the database first — `DATABASE_URL` is required and the server will not start without it.
 - [ ] Add `RESEND_API_KEY` and a verified `EMAIL_FROM` address.
 - [ ] Add Cloudinary credentials for durable file delivery.
 - [ ] Add `SLACK_WEBHOOK_URL` when the team wants decision notifications.

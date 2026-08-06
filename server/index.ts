@@ -5,7 +5,7 @@ import express, { type NextFunction, type Request, type Response } from 'express
 import rateLimit from 'express-rate-limit';
 import helmet from 'helmet';
 import multer from 'multer';
-import { nanoid } from 'nanoid';
+import { customAlphabet, nanoid } from 'nanoid';
 import fs from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
@@ -20,6 +20,9 @@ import {
   settingsSchema,
 } from './validation.js';
 import { createRepository } from './repository.js';
+import { getPool } from './db/pool.js';
+import { runMigrations } from './db/migrate.js';
+import { seedWorkspace } from './db/seed.js';
 import {
   addActivity,
   addNotification,
@@ -128,6 +131,13 @@ function escapeHtml(value: string) {
   })[character] ?? character);
 }
 
+/**
+ * Receipt codes are read aloud and retyped by clients, so the suffix uses an
+ * explicit uppercase alphanumeric alphabet. nanoid's default alphabet includes
+ * `-` and `_`, which produced codes like `PND-EMBERC--VTVLR`.
+ */
+const receiptSuffix = customAlphabet('ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789', 6);
+
 /** Applies a client decision. Shared by the studio and public review routes. */
 async function applyDecision(
   tx: pg.PoolClient,
@@ -136,7 +146,7 @@ async function applyDecision(
 ): Promise<void> {
   const revision = await requireRevision(tx, project.id, input.revisionId);
   const company = await tx.query<{ company: string }>(`SELECT company FROM clients WHERE id = $1`, [project.client_id]);
-  const receiptCode = `PND-${(company.rows[0]?.company ?? '').replace(/[^A-Za-z]/g, '').slice(0, 6).toUpperCase()}-${nanoid(6).toUpperCase()}`;
+  const receiptCode = `PND-${(company.rows[0]?.company ?? '').replace(/[^A-Za-z]/g, '').slice(0, 6).toUpperCase()}-${receiptSuffix()}`;
 
   await tx.query(
     `INSERT INTO decisions (id, project_id, revision_id, type, client_name, client_email, note, receipt_code)
@@ -574,11 +584,43 @@ app.use((error: unknown, _req: Request, res: Response, _next: NextFunction) => {
         : 'That record already exists',
     });
   }
+  // A foreign-key or check violation means the request pointed at something
+  // that does not exist, or carried a value the schema rejects. Both are the
+  // caller's mistake, so they are 400s rather than 500s.
+  if (error && typeof error === 'object' && 'code' in error) {
+    const code = String((error as { code?: string }).code);
+    if (code === '23503') {
+      return res.status(400).json({ error: 'Referenced record does not exist' });
+    }
+    if (code === '23514') {
+      return res.status(400).json({ error: 'Invalid value for one of the fields' });
+    }
+  }
   const message = error instanceof Error ? error.message : 'Unexpected server error';
   const status = error && typeof error === 'object' && 'status' in error ? Number(error.status) : 500;
   res.status(Number.isFinite(status) ? status : 500).json({ error: message });
 });
 
-app.listen(port, '0.0.0.0', () => {
-  console.log(`Pind server running on http://0.0.0.0:${port} (${repository.mode})`);
-});
+/**
+ * Connect, migrate, and seed before the first request can arrive. A missing or
+ * unreachable database exits non-zero without binding the port, so Replit
+ * restarts the deployment instead of serving an application that would fail
+ * every request.
+ */
+async function start(): Promise<void> {
+  try {
+    const pool = getPool();
+    await runMigrations(pool);
+    const { inserted } = await seedWorkspace(pool);
+    if (inserted) console.log('Seeded the Northstar demo workspace.');
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : error);
+    process.exit(1);
+  }
+
+  app.listen(port, '0.0.0.0', () => {
+    console.log(`Pind server running on http://0.0.0.0:${port} (${repository.mode})`);
+  });
+}
+
+await start();

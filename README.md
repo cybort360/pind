@@ -25,16 +25,39 @@ The template supports two distinct experiences:
 ## Quick start on Replit
 
 1. Remix the template.
-2. Click **Run**. Pind works immediately in file-backed demo mode.
-3. Open `/app` for the studio workspace.
-4. Open the seeded **Summer Packaging Redesign** project and choose **Client view**.
-5. Add environment variables from `.env.example` when you want persistent database storage, email, cloud file storage, or Slack notifications.
-6. Publish from the Replit workspace.
+2. Open the **Database** tool and click **Create**. This injects `DATABASE_URL`, which Pind requires.
+3. Click **Run**. The server migrates the schema and seeds the demo workspace on first boot.
+4. Open `/app` for the studio workspace.
+5. Open the seeded **Summer Packaging Redesign** project and choose **Client view**.
+6. Add the remaining environment variables from `.env.example` when you want email, cloud file storage, or Slack notifications.
+7. Publish from the Replit workspace.
 
 ## Local development
 
 ```bash
 npm install
+```
+
+Pind requires PostgreSQL. On Replit, open the Database tool and click Create —
+`DATABASE_URL` is injected automatically. Locally:
+
+```bash
+createdb pind
+export DATABASE_URL=postgres://localhost:5432/pind
+```
+
+The server runs migrations and seeds the Northstar demo workspace on boot, so
+no manual step is needed. To reseed by hand:
+
+```bash
+npm run db:migrate   # apply pending migrations
+npm run db:seed      # idempotent; safe to run repeatedly
+npm run db:reset     # wipe and re-seed the demo workspace
+```
+
+Then start the development server:
+
+```bash
 npm run dev
 ```
 
@@ -60,11 +83,11 @@ npm start
 
 ## Integrations
 
-All integrations are optional-by-configuration. The application remains fully explorable without credentials.
+PostgreSQL is required. Every other integration is optional-by-configuration, and the application remains fully explorable without their credentials.
 
 | Integration | Environment variables | Fallback |
 | --- | --- | --- |
-| PostgreSQL / Replit Database | `DATABASE_URL` | JSON state in `.data/pind.json` |
+| PostgreSQL / Replit Database | `DATABASE_URL` | **Required** — the server exits at boot without it |
 | Resend | `RESEND_API_KEY`, `EMAIL_FROM` | Review URL is copied instead of sending email |
 | Cloudinary | `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, `CLOUDINARY_API_SECRET` | Files are stored under `/uploads` |
 | Slack | `SLACK_WEBHOOK_URL` | Decision is stored without a team notification |
@@ -100,7 +123,7 @@ Additional projects demonstrate requested changes, draft work, and an approved p
 Reset the sample workspace from **Settings → Reset sample data** or run:
 
 ```bash
-npm run seed
+npm run db:reset
 ```
 
 ## Security and data boundaries
@@ -119,9 +142,11 @@ The published Buildathon demo intentionally leaves the studio workspace explorab
 pind/
 ├── public/assets/          # Seeded visual deliverables
 ├── server/
+│   ├── db/                 # Pool, migrations runner, seed, row mapping, writes
+│   ├── migrations/         # Versioned SQL schema migrations
 │   ├── index.ts            # API, uploads, review routes, deployment server
 │   ├── integrations.ts     # Cloudinary, Resend, Slack
-│   ├── repository.ts       # PostgreSQL or file repository
+│   ├── repository.ts       # PostgreSQL repository boundary
 │   ├── seed-data.ts        # Realistic first-run workspace
 │   └── validation.ts       # Zod request contracts
 ├── shared/types.ts         # Shared domain model

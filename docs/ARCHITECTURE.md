@@ -47,14 +47,13 @@ A `Decision` always references a `Revision`. This is the core invariant behind a
 
 ## Repository strategy
 
-`createRepository()` chooses an implementation at startup:
+`createRepository()` returns the single `PostgresRepository`. `DATABASE_URL` is required: without a reachable database the server prints the setup message and exits before binding the port.
 
-- `DATABASE_URL` present → `PostgresRepository`.
-- No database URL → `FileRepository`.
+The repository exposes `read`, `readReviewPayload`, `transaction`, and `reset`. State lives in normalised tables (`workspaces`, `clients`, `projects`, `revisions`, `comments`, `decisions`, `milestones`, `activities`, `notifications`, `review_tokens`), defined by the versioned migrations in `server/migrations/`.
 
-Both implement the same `read`, `write`, and `reset` contract. The PostgreSQL version stores the complete demo state as JSONB in one row. That keeps the template understandable and makes remixing painless. A production SaaS can replace this adapter with normalised multi-tenant tables without changing page-level API contracts.
+Every mutation runs inside a real Postgres transaction and rolls back as a unit on failure, so concurrent writes are serialised by the database rather than by an in-process queue. Constraint violations carry HTTP semantics: `23505` → 409, `23503` and `23514` → 400.
 
-Writes are serialised through an in-process queue to prevent two mutations from overwriting each other inside one application instance.
+On boot the server applies pending migrations under an advisory lock (safe when autoscale starts several instances at once), then seeds the demo workspace if it is absent. Both steps are idempotent.
 
 ## Integration behaviour
 
