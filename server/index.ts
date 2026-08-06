@@ -9,6 +9,8 @@ import { nanoid } from 'nanoid';
 import fs from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
+// `pg` is CommonJS, so only the default export is statically analysable.
+import type pg from 'pg';
 import {
   commentSchema,
   createClientSchema,
@@ -18,8 +20,17 @@ import {
   settingsSchema,
 } from './validation.js';
 import { createRepository } from './repository.js';
+import {
+  addActivity,
+  addNotification,
+  requireProject,
+  requireProjectByToken,
+  requireRevision,
+  touchClient,
+} from './db/writes.js';
+import { DEMO_WORKSPACE_ID } from './seed-data.js';
 import { integrationFlags, notifySlack, sendEmail, uploadToCloudinary } from './integrations.js';
-import type { Activity, AppState, Notification, Project, ReviewPayload, Revision } from '../shared/types.js';
+import type { AppState, DecisionType, Project, Revision } from '../shared/types.js';
 
 const app = express();
 const isProduction = process.env.NODE_ENV === 'production';
@@ -92,20 +103,15 @@ app.use(
   }),
 );
 
-let writeQueue: Promise<void> = Promise.resolve();
+// Cycle 2 replaces this with the authenticated user's workspace.
+const workspaceId = DEMO_WORKSPACE_ID;
 
-async function updateState(mutator: (draft: AppState) => void | Promise<void>): Promise<AppState> {
-  let result!: AppState;
-  const operation = writeQueue.then(async () => {
-    const state = await repository.read();
-    state.integrations = integrationFlags(repository.mode);
-    await mutator(state);
-    await repository.write(state);
-    result = state;
-  });
-  writeQueue = operation.then(() => undefined, () => undefined);
-  await operation;
-  return result;
+/** Runs a mutation in a transaction, then returns the freshly-read state. */
+async function mutate(fn: (tx: pg.PoolClient) => Promise<void>): Promise<AppState> {
+  await repository.transaction(fn);
+  const state = await repository.read(workspaceId);
+  state.integrations = integrationFlags(repository.mode);
+  return state;
 }
 
 function nowIso() {
@@ -122,67 +128,58 @@ function escapeHtml(value: string) {
   })[character] ?? character);
 }
 
-function addActivity(state: AppState, activity: Omit<Activity, 'id' | 'createdAt'>) {
-  state.activities.unshift({ id: `activity-${nanoid(8)}`, createdAt: nowIso(), ...activity });
-  state.activities = state.activities.slice(0, 100);
-}
+/** Applies a client decision. Shared by the studio and public review routes. */
+async function applyDecision(
+  tx: pg.PoolClient,
+  project: { id: string; workspace_id: string; client_id: string; name: string; status: Project['status'] },
+  input: { type: DecisionType; revisionId: string; clientName: string; clientEmail: string; note: string },
+): Promise<void> {
+  const revision = await requireRevision(tx, project.id, input.revisionId);
+  const company = await tx.query<{ company: string }>(`SELECT company FROM clients WHERE id = $1`, [project.client_id]);
+  const receiptCode = `PND-${(company.rows[0]?.company ?? '').replace(/[^A-Za-z]/g, '').slice(0, 6).toUpperCase()}-${nanoid(6).toUpperCase()}`;
 
-function addNotification(state: AppState, notification: Omit<Notification, 'id' | 'createdAt' | 'read'>) {
-  state.notifications.unshift({
-    id: `notification-${nanoid(8)}`,
-    createdAt: nowIso(),
-    read: false,
-    ...notification,
+  await tx.query(
+    `INSERT INTO decisions (id, project_id, revision_id, type, client_name, client_email, note, receipt_code)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+    [`decision-${nanoid(8)}`, project.id, revision.id, input.type, input.clientName,
+     input.clientEmail, input.note, receiptCode],
+  );
+
+  await tx.query(
+    `UPDATE projects SET status = $2, updated_at = NOW(),
+       progress = CASE WHEN $2 = 'approved' THEN 100 ELSE GREATEST(45, progress - 5) END
+     WHERE id = $1`,
+    [project.id, input.type],
+  );
+  await touchClient(tx, project.client_id);
+
+  if (input.type === 'approved') {
+    // Advance the milestone chain: current -> complete, first upcoming -> current.
+    await tx.query(
+      `UPDATE milestones SET status = 'complete'
+       WHERE id = (SELECT id FROM milestones WHERE project_id = $1 AND status = 'current'
+                   ORDER BY position LIMIT 1)`,
+      [project.id],
+    );
+    await tx.query(
+      `UPDATE milestones SET status = 'current'
+       WHERE id = (SELECT id FROM milestones WHERE project_id = $1 AND status = 'upcoming'
+                   ORDER BY position LIMIT 1)`,
+      [project.id],
+    );
+  }
+
+  await addActivity(tx, {
+    workspaceId: project.workspace_id, projectId: project.id, type: 'approval',
+    title: input.type === 'approved' ? `${project.name} approved` : `Changes requested on ${project.name}`,
+    detail: input.note || `Decision captured for revision ${revision.version}.`,
+    actor: input.clientName,
   });
-  state.notifications = state.notifications.slice(0, 50);
-}
-
-function touchClient(state: AppState, project: Project) {
-  const client = state.clients.find((item) => item.id === project.clientId);
-  if (client) {
-    client.lastActiveAt = nowIso();
-    client.status = 'active';
-  }
-  return client;
-}
-
-function syncClientProjectCount(state: AppState, project: Project, previousStatus: Project['status']) {
-  const client = touchClient(state, project);
-  if (!client) return;
-  if (previousStatus !== 'approved' && project.status === 'approved') {
-    client.activeProjects = Math.max(0, client.activeProjects - 1);
-  } else if (previousStatus === 'approved' && project.status !== 'approved') {
-    client.activeProjects += 1;
-  }
-}
-
-function findProject(state: AppState, id: string): Project {
-  const project = state.projects.find((item) => item.id === id);
-  if (!project) {
-    const error = new Error('Project not found') as Error & { status?: number };
-    error.status = 404;
-    throw error;
-  }
-  return project;
-}
-
-function findReviewProject(state: AppState, token: string): Project {
-  const project = state.projects.find((item) => item.reviewToken === token);
-  if (!project) {
-    const error = new Error('Review link not found') as Error & { status?: number };
-    error.status = 404;
-    throw error;
-  }
-  return project;
-}
-
-function toReviewPayload(state: AppState, token: string): ReviewPayload {
-  const project = findReviewProject(state, token);
-  return {
-    project,
-    workspace: state.workspace,
-    client: state.clients.find((item) => item.id === project.clientId),
-  };
+  await addNotification(tx, {
+    workspaceId: project.workspace_id, projectId: project.id,
+    title: input.type === 'approved' ? 'Client approval captured' : 'Client requested changes',
+    body: `${input.clientName} responded to ${revision.label}.`,
+  });
 }
 
 function appUrl(req?: Request) {
@@ -204,7 +201,7 @@ function route(handler: (req: Request, res: Response, next: NextFunction) => Pro
 }
 
 app.get('/api/health', route(async (_req, res) => {
-  const state = await repository.read();
+  const state = await repository.read(workspaceId);
   res.json({
     ok: true,
     app: 'Pind',
@@ -215,103 +212,54 @@ app.get('/api/health', route(async (_req, res) => {
 }));
 
 app.get('/api/bootstrap', route(async (_req, res) => {
-  const state = await repository.read();
+  const state = await repository.read(workspaceId);
   state.integrations = integrationFlags(repository.mode);
   res.json({ state, meta: { repository: repository.mode, generatedAt: nowIso() } });
 }));
 
 app.get('/api/review/:token', route(async (req, res) => {
-  const state = await repository.read();
-  res.json(toReviewPayload(state, req.params.token));
+  const payload = await repository.readReviewPayload(req.params.token);
+  if (!payload) {
+    const error = new Error('Review link not found') as Error & { status?: number };
+    error.status = 404;
+    throw error;
+  }
+  res.json(payload);
 }));
 
 app.post('/api/review/:token/comments', route(async (req, res) => {
   const input = commentSchema.parse(req.body);
-  const state = await updateState((draft) => {
-    const project = findReviewProject(draft, req.params.token);
-    const revision = project.revisions.find((item) => item.id === input.revisionId);
-    if (!revision) {
-      const error = new Error('Revision not found') as Error & { status?: number };
-      error.status = 400;
-      throw error;
-    }
-    project.comments.unshift({
-      id: `comment-${nanoid(8)}`,
-      projectId: project.id,
-      revisionId: revision.id,
-      author: input.author,
-      authorRole: 'client',
-      body: input.body,
-      status: 'open',
-      createdAt: nowIso(),
-      x: input.x,
-      y: input.y,
+  await repository.transaction(async (tx) => {
+    const project = await requireProjectByToken(tx, req.params.token);
+    const revision = await requireRevision(tx, project.id, input.revisionId);
+    await tx.query(
+      `INSERT INTO comments (id, project_id, revision_id, author, author_role, body, status, x, y)
+       VALUES ($1,$2,$3,$4,'client',$5,'open',$6,$7)`,
+      [`comment-${nanoid(8)}`, project.id, revision.id, input.author, input.body,
+       input.x ?? null, input.y ?? null],
+    );
+    await tx.query(`UPDATE projects SET updated_at = NOW(), status = 'in-review' WHERE id = $1`, [project.id]);
+    await touchClient(tx, project.client_id);
+    await addActivity(tx, {
+      workspaceId: project.workspace_id, projectId: project.id, type: 'comment',
+      title: `New comment on ${project.name}`, detail: input.body, actor: input.author,
     });
-    project.updatedAt = nowIso();
-    project.status = 'in-review';
-    touchClient(draft, project);
-    addActivity(draft, {
-      type: 'comment',
-      title: `New comment on ${project.name}`,
-      detail: input.body,
-      actor: input.author,
-      projectId: project.id,
-    });
-    addNotification(draft, {
-      title: 'New client feedback',
-      body: `${input.author} commented on ${revision.label}.`,
-      projectId: project.id,
+    await addNotification(tx, {
+      workspaceId: project.workspace_id, projectId: project.id,
+      title: 'New client feedback', body: `${input.author} commented on ${revision.label}.`,
     });
   });
-  res.status(201).json(toReviewPayload(state, req.params.token));
+  const payload = await repository.readReviewPayload(req.params.token);
+  res.status(201).json(payload);
 }));
 
 app.post('/api/review/:token/decision', route(async (req, res) => {
   const input = decisionSchema.parse(req.body);
   let projectName = '';
-  const state = await updateState((draft) => {
-    const project = findReviewProject(draft, req.params.token);
-    const revision = project.revisions.find((item) => item.id === input.revisionId);
-    if (!revision) {
-      const error = new Error('Revision not found') as Error & { status?: number };
-      error.status = 400;
-      throw error;
-    }
+  await repository.transaction(async (tx) => {
+    const project = await requireProjectByToken(tx, req.params.token);
     projectName = project.name;
-    const previousStatus = project.status;
-    const receiptCode = `PND-${project.clientName.replace(/[^A-Za-z]/g, '').slice(0, 6).toUpperCase()}-${nanoid(6).toUpperCase()}`;
-    project.decisions.unshift({
-      id: `decision-${nanoid(8)}`,
-      type: input.type,
-      revisionId: revision.id,
-      clientName: input.clientName,
-      clientEmail: input.clientEmail,
-      note: input.note,
-      createdAt: nowIso(),
-      receiptCode,
-    });
-    project.status = input.type;
-    project.progress = input.type === 'approved' ? 100 : Math.max(45, project.progress - 5);
-    project.updatedAt = nowIso();
-    syncClientProjectCount(draft, project, previousStatus);
-    if (input.type === 'approved') {
-      const current = project.milestones.find((item) => item.status === 'current');
-      if (current) current.status = 'complete';
-      const upcoming = project.milestones.find((item) => item.status === 'upcoming');
-      if (upcoming) upcoming.status = 'current';
-    }
-    addActivity(draft, {
-      type: 'approval',
-      title: input.type === 'approved' ? `${project.name} approved` : `Changes requested on ${project.name}`,
-      detail: input.note || `Decision captured for revision ${revision.version}.`,
-      actor: input.clientName,
-      projectId: project.id,
-    });
-    addNotification(draft, {
-      title: input.type === 'approved' ? 'Client approval captured' : 'Client requested changes',
-      body: `${input.clientName} responded to ${revision.label}.`,
-      projectId: project.id,
-    });
+    await applyDecision(tx, project, input);
   });
 
   void notifySlack(
@@ -320,30 +268,22 @@ app.post('/api/review/:token/decision', route(async (req, res) => {
       : `↩️ ${input.clientName} requested changes on ${projectName}.`,
   ).catch(console.error);
 
-  res.status(201).json(toReviewPayload(state, req.params.token));
+  res.status(201).json(await repository.readReviewPayload(req.params.token));
 }));
 
 app.post('/api/clients', route(async (req, res) => {
   const input = createClientSchema.parse(req.body);
-  const state = await updateState((draft) => {
-    const duplicate = draft.clients.some((client) => client.email.toLowerCase() === input.email.toLowerCase());
-    if (duplicate) {
-      const error = new Error('A client with this email already exists') as Error & { status?: number };
-      error.status = 409;
-      throw error;
-    }
+  const state = await mutate(async (tx) => {
     const avatar = input.name.split(/\s+/).map((part) => part[0]).join('').slice(0, 2).toUpperCase();
-    draft.clients.unshift({
-      id: `client-${nanoid(10)}`,
-      name: input.name,
-      company: input.company,
-      email: input.email.toLowerCase(),
-      avatar,
-      activeProjects: 0,
-      lastActiveAt: nowIso(),
-      status: 'active',
-    });
-    addActivity(draft, {
+    // The UNIQUE (workspace_id, lower(email)) index enforces this; a 23505
+    // is mapped to HTTP 409 by the error middleware.
+    await tx.query(
+      `INSERT INTO clients (id, workspace_id, name, company, email, avatar, status)
+       VALUES ($1,$2,$3,$4,$5,$6,'active')`,
+      [`client-${nanoid(10)}`, workspaceId, input.name, input.company, input.email.toLowerCase(), avatar],
+    );
+    await addActivity(tx, {
+      workspaceId,
       type: 'project',
       title: `${input.company} added`,
       detail: `${input.name} was added to the client directory.`,
@@ -355,46 +295,41 @@ app.post('/api/clients', route(async (req, res) => {
 
 app.post('/api/projects', route(async (req, res) => {
   const input = createProjectSchema.parse(req.body);
-  const state = await updateState((draft) => {
-    const client = draft.clients.find((item) => item.id === input.clientId);
-    if (!client) {
+  const state = await mutate(async (tx) => {
+    const client = await tx.query(`SELECT id, company FROM clients WHERE id = $1 AND workspace_id = $2`,
+      [input.clientId, workspaceId]);
+    if (client.rowCount === 0) {
       const error = new Error('Client not found') as Error & { status?: number };
       error.status = 400;
       throw error;
     }
 
     const id = `project-${nanoid(10)}`;
-    const project: Project = {
-      id,
-      name: input.name,
-      clientId: client.id,
-      clientName: client.company,
-      category: input.category,
-      status: 'draft',
-      dueAt: input.dueAt,
-      updatedAt: nowIso(),
-      progress: 12,
-      description: input.description,
-      cover: '/assets/field.svg',
-      reviewToken: `${input.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 22)}-${nanoid(18)}`,
-      budgetLabel: input.budgetLabel,
-      owner: 'Maya Okeke',
-      revisions: [],
-      comments: [],
-      milestones: [
-        { id: `milestone-${nanoid(6)}`, title: 'Project kickoff', dueAt: nowIso(), status: 'complete' },
-        { id: `milestone-${nanoid(6)}`, title: 'First review', dueAt: input.dueAt, status: 'current' },
-      ],
-      decisions: [],
-    };
-    draft.projects.unshift(project);
-    client.activeProjects += 1;
-    addActivity(draft, {
+    await tx.query(
+      `INSERT INTO projects (id, workspace_id, client_id, name, category, status, due_at,
+         progress, description, cover, budget_label, owner)
+       VALUES ($1,$2,$3,$4,$5,'draft',$6,12,$7,'/assets/field.svg',$8,'Maya Okeke')`,
+      [id, workspaceId, input.clientId, input.name, input.category, input.dueAt,
+       input.description, input.budgetLabel],
+    );
+
+    const token = `${input.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 22)}-${nanoid(18)}`;
+    await tx.query(`INSERT INTO review_tokens (token, project_id) VALUES ($1,$2)`, [token, id]);
+
+    await tx.query(
+      `INSERT INTO milestones (id, project_id, title, due_at, status, position) VALUES
+         ($1,$2,'Project kickoff',NOW(),'complete',0),
+         ($3,$2,'First review',$4,'current',1)`,
+      [`milestone-${nanoid(6)}`, id, `milestone-${nanoid(6)}`, input.dueAt],
+    );
+
+    await addActivity(tx, {
+      workspaceId,
+      projectId: id,
       type: 'project',
-      title: `${project.name} created`,
-      detail: `A new ${project.category.toLowerCase()} project was created for ${project.clientName}.`,
-      actor: project.owner,
-      projectId: project.id,
+      title: `${input.name} created`,
+      detail: `A new ${input.category.toLowerCase()} project was created for ${client.rows[0].company}.`,
+      actor: 'Maya Okeke',
     });
   });
   res.status(201).json(state);
@@ -402,73 +337,54 @@ app.post('/api/projects', route(async (req, res) => {
 
 app.post('/api/projects/:id/comments', route(async (req, res) => {
   const input = commentSchema.parse(req.body);
-  const state = await updateState((draft) => {
-    const project = findProject(draft, req.params.id);
-    const revision = project.revisions.find((item) => item.id === input.revisionId);
-    if (!revision) {
-      const error = new Error('Revision not found') as Error & { status?: number };
-      error.status = 400;
-      throw error;
-    }
-    project.comments.unshift({
-      id: `comment-${nanoid(8)}`,
-      projectId: project.id,
-      revisionId: revision.id,
-      author: input.author,
-      authorRole: input.authorRole,
-      body: input.body,
-      status: 'open',
-      createdAt: nowIso(),
-      x: input.x,
-      y: input.y,
-    });
-    project.updatedAt = nowIso();
-    if (input.authorRole === 'client') project.status = 'in-review';
-    addActivity(draft, {
-      type: 'comment',
-      title: `New comment on ${project.name}`,
-      detail: input.body,
-      actor: input.author,
-      projectId: project.id,
-    });
+  const state = await mutate(async (tx) => {
+    const project = await requireProject(tx, req.params.id);
+    const revision = await requireRevision(tx, project.id, input.revisionId);
+    await tx.query(
+      `INSERT INTO comments (id, project_id, revision_id, author, author_role, body, status, x, y)
+       VALUES ($1,$2,$3,$4,$5,$6,'open',$7,$8)`,
+      [`comment-${nanoid(8)}`, project.id, revision.id, input.author, input.authorRole,
+       input.body, input.x ?? null, input.y ?? null],
+    );
     if (input.authorRole === 'client') {
-      touchClient(draft, project);
-      addNotification(draft, {
-        title: 'New client feedback',
-        body: `${input.author} commented on ${revision.label}.`,
-        projectId: project.id,
+      await tx.query(`UPDATE projects SET updated_at = NOW(), status = 'in-review' WHERE id = $1`, [project.id]);
+      await touchClient(tx, project.client_id);
+      await addNotification(tx, {
+        workspaceId: project.workspace_id, projectId: project.id,
+        title: 'New client feedback', body: `${input.author} commented on ${revision.label}.`,
       });
+    } else {
+      await tx.query(`UPDATE projects SET updated_at = NOW() WHERE id = $1`, [project.id]);
     }
+    await addActivity(tx, {
+      workspaceId: project.workspace_id, projectId: project.id, type: 'comment',
+      title: `New comment on ${project.name}`, detail: input.body, actor: input.author,
+    });
   });
   res.status(201).json(state);
 }));
 
 app.patch('/api/comments/:id/resolve', route(async (req, res) => {
   const reply = typeof req.body?.reply === 'string' ? req.body.reply.slice(0, 400) : '';
-  const state = await updateState((draft) => {
-    let found = false;
-    for (const project of draft.projects) {
-      const comment = project.comments.find((item) => item.id === req.params.id);
-      if (!comment) continue;
-      comment.status = 'resolved';
-      comment.resolvedAt = nowIso();
-      comment.reply = reply || comment.reply;
-      project.updatedAt = nowIso();
-      addActivity(draft, {
-        type: 'resolve',
-        title: 'Feedback resolved',
-        detail: comment.body,
-        actor: 'Maya Okeke',
-        projectId: project.id,
-      });
-      found = true;
-      break;
-    }
-    if (!found) {
+  const state = await mutate(async (tx) => {
+    const result = await tx.query(
+      `UPDATE comments SET status = 'resolved', resolved_at = NOW(),
+         reply = COALESCE(NULLIF($2,''), reply)
+       WHERE id = $1
+       RETURNING project_id, body`,
+      [req.params.id, reply],
+    );
+    if (result.rowCount === 0) {
       const error = new Error('Comment not found') as Error & { status?: number };
       error.status = 404;
       throw error;
     }
+    const { project_id: projectId, body } = result.rows[0];
+    await tx.query(`UPDATE projects SET updated_at = NOW() WHERE id = $1`, [projectId]);
+    await addActivity(tx, {
+      workspaceId, projectId, type: 'resolve',
+      title: 'Feedback resolved', detail: body, actor: 'Maya Okeke',
+    });
   });
   res.json(state);
 }));
@@ -491,43 +407,42 @@ app.post('/api/projects/:id/revisions', upload.single('file'), route(async (req,
     fileUrl = `/uploads/${safeName}`;
   }
 
-  const state = await updateState((draft) => {
-    const project = findProject(draft, projectId);
-    const version = Math.max(0, ...project.revisions.map((item) => item.version)) + 1;
+  const state = await mutate(async (tx) => {
+    const project = await requireProject(tx, projectId);
+    // UNIQUE (project_id, version) makes this safe under concurrent uploads;
+    // a collision surfaces as 23505 rather than two rows sharing a version.
+    const next = await tx.query<{ version: number }>(
+      `SELECT COALESCE(MAX(version), 0) + 1 AS version FROM revisions WHERE project_id = $1`,
+      [projectId],
+    );
+    const version = next.rows[0].version;
     const kind: Revision['kind'] = req.file!.mimetype.startsWith('image/')
       ? 'image'
       : req.file!.mimetype.startsWith('video/')
         ? 'video'
-        : req.file!.mimetype.includes('pdf')
-          ? 'pdf'
-          : 'file';
-    project.revisions.push({
-      id: `revision-${nanoid(8)}`,
-      label,
-      version,
-      fileName: req.file!.originalname,
-      fileUrl,
-      thumbnail: kind === 'image' ? fileUrl : undefined,
-      kind,
-      uploadedAt: nowIso(),
-      uploadedBy: 'Maya Okeke',
-      sizeLabel: `${(req.file!.size / (1024 * 1024)).toFixed(1)} MB`,
-      note,
-    });
-    project.updatedAt = nowIso();
-    project.status = 'in-review';
-    project.progress = Math.min(95, project.progress + 12);
-    addActivity(draft, {
-      type: 'upload',
+        : req.file!.mimetype.includes('pdf') ? 'pdf' : 'file';
+
+    await tx.query(
+      `INSERT INTO revisions (id, project_id, label, version, file_name, file_url, thumbnail,
+         kind, uploaded_by, size_label, note)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'Maya Okeke',$9,$10)`,
+      [`revision-${nanoid(8)}`, projectId, label, version, req.file!.originalname, fileUrl,
+       kind === 'image' ? fileUrl : null, kind,
+       `${(req.file!.size / (1024 * 1024)).toFixed(1)} MB`, note],
+    );
+    await tx.query(
+      `UPDATE projects SET updated_at = NOW(), status = 'in-review',
+         progress = LEAST(95, progress + 12) WHERE id = $1`,
+      [projectId],
+    );
+    await addActivity(tx, {
+      workspaceId: project.workspace_id, projectId, type: 'upload',
       title: `Revision ${version} uploaded`,
-      detail: `${req.file!.originalname} was stored with ${provider}.`,
-      actor: 'Maya Okeke',
-      projectId: project.id,
+      detail: `${req.file!.originalname} was stored with ${provider}.`, actor: 'Maya Okeke',
     });
-    addNotification(draft, {
-      title: 'Revision ready to share',
-      body: `${project.name} now has revision ${version}.`,
-      projectId: project.id,
+    await addNotification(tx, {
+      workspaceId: project.workspace_id, projectId,
+      title: 'Revision ready to share', body: `${project.name} now has revision ${version}.`,
     });
   });
 
@@ -537,49 +452,10 @@ app.post('/api/projects/:id/revisions', upload.single('file'), route(async (req,
 app.post('/api/projects/:id/decision', route(async (req, res) => {
   const input = decisionSchema.parse(req.body);
   let projectName = '';
-  const state = await updateState((draft) => {
-    const project = findProject(draft, req.params.id);
-    const revision = project.revisions.find((item) => item.id === input.revisionId);
-    if (!revision) {
-      const error = new Error('Revision not found') as Error & { status?: number };
-      error.status = 400;
-      throw error;
-    }
+  const state = await mutate(async (tx) => {
+    const project = await requireProject(tx, req.params.id);
     projectName = project.name;
-    const previousStatus = project.status;
-    const receiptCode = `PND-${project.clientName.replace(/[^A-Za-z]/g, '').slice(0, 6).toUpperCase()}-${nanoid(6).toUpperCase()}`;
-    project.decisions.unshift({
-      id: `decision-${nanoid(8)}`,
-      type: input.type,
-      revisionId: input.revisionId,
-      clientName: input.clientName,
-      clientEmail: input.clientEmail,
-      note: input.note,
-      createdAt: nowIso(),
-      receiptCode,
-    });
-    project.status = input.type;
-    project.progress = input.type === 'approved' ? 100 : Math.max(45, project.progress - 5);
-    project.updatedAt = nowIso();
-    syncClientProjectCount(draft, project, previousStatus);
-    if (input.type === 'approved') {
-      const current = project.milestones.find((item) => item.status === 'current');
-      if (current) current.status = 'complete';
-      const upcoming = project.milestones.find((item) => item.status === 'upcoming');
-      if (upcoming) upcoming.status = 'current';
-    }
-    addActivity(draft, {
-      type: 'approval',
-      title: input.type === 'approved' ? `${project.name} approved` : `Changes requested on ${project.name}`,
-      detail: input.note || `Decision captured for revision ${revision.version}.`,
-      actor: input.clientName,
-      projectId: project.id,
-    });
-    addNotification(draft, {
-      title: input.type === 'approved' ? 'Client approval captured' : 'Client requested changes',
-      body: `${input.clientName} responded to ${revision.label}.`,
-      projectId: project.id,
-    });
+    await applyDecision(tx, project, input);
   });
 
   void notifySlack(
@@ -593,8 +469,13 @@ app.post('/api/projects/:id/decision', route(async (req, res) => {
 
 app.post('/api/projects/:id/invite', route(async (req, res) => {
   const input = inviteSchema.parse(req.body);
-  const state = await repository.read();
-  const project = findProject(state, req.params.id);
+  const state = await repository.read(workspaceId);
+  const project = state.projects.find((item) => item.id === req.params.id);
+  if (!project) {
+    const error = new Error('Project not found') as Error & { status?: number };
+    error.status = 404;
+    throw error;
+  }
   const reviewUrl = `${appUrl(req)}/review/${project.reviewToken}`;
   const safeWorkspaceName = escapeHtml(state.workspace.name);
   const safeProjectName = escapeHtml(project.name);
@@ -612,13 +493,11 @@ app.post('/api/projects/:id/invite', route(async (req, res) => {
       </div>`,
   });
 
-  const updated = await updateState((draft) => {
-    addActivity(draft, {
-      type: 'invite',
+  const updated = await mutate(async (tx) => {
+    await addActivity(tx, {
+      workspaceId, projectId: project.id, type: 'invite',
       title: `Review invitation ${result.sent ? 'sent' : 'prepared'}`,
-      detail: `${input.email} was invited to review ${project.name}.`,
-      actor: 'Maya Okeke',
-      projectId: project.id,
+      detail: `${input.email} was invited to review ${project.name}.`, actor: 'Maya Okeke',
     });
   });
 
@@ -627,30 +506,35 @@ app.post('/api/projects/:id/invite', route(async (req, res) => {
 
 app.patch('/api/settings', route(async (req, res) => {
   const input = settingsSchema.parse(req.body);
-  const state = await updateState((draft) => {
-    draft.workspace = input;
-    addActivity(draft, {
-      type: 'project',
-      title: 'Workspace branding updated',
-      detail: `The client portal now uses ${input.name} branding.`,
-      actor: 'Maya Okeke',
+  const state = await mutate(async (tx) => {
+    await tx.query(
+      `UPDATE workspaces SET name=$2, short_name=$3, logo_text=$4, accent=$5, surface=$6,
+         portal_headline=$7, approval_disclaimer=$8, email_from_name=$9,
+         require_client_name=$10, allow_downloads=$11, show_revision_history=$12, updated_at=NOW()
+       WHERE id = $1`,
+      [workspaceId, input.name, input.shortName, input.logoText, input.accent, input.surface,
+       input.portalHeadline, input.approvalDisclaimer, input.emailFromName,
+       input.requireClientName, input.allowDownloads, input.showRevisionHistory],
+    );
+    await addActivity(tx, {
+      workspaceId, type: 'project', title: 'Workspace branding updated',
+      detail: `The client portal now uses ${input.name} branding.`, actor: 'Maya Okeke',
     });
   });
   res.json(state);
 }));
 
 app.patch('/api/notifications/:id/read', route(async (req, res) => {
-  const state = await updateState((draft) => {
-    const notification = draft.notifications.find((item) => item.id === req.params.id);
-    if (notification) notification.read = true;
+  const state = await mutate(async (tx) => {
+    await tx.query(`UPDATE notifications SET read = TRUE WHERE id = $1 AND workspace_id = $2`,
+      [req.params.id, workspaceId]);
   });
   res.json(state);
 }));
 
 app.post('/api/demo/reset', route(async (_req, res) => {
-  const state = await repository.reset();
+  const state = await repository.reset(workspaceId);
   state.integrations = integrationFlags(repository.mode);
-  await repository.write(state);
   res.json(state);
 }));
 
@@ -678,6 +562,17 @@ app.use((error: unknown, _req: Request, res: Response, _next: NextFunction) => {
   console.error(error);
   if (error && typeof error === 'object' && 'issues' in error) {
     return res.status(400).json({ error: 'Invalid request', details: error });
+  }
+  // Postgres unique violations are conflicts, not server faults. The only one
+  // a client can trigger deliberately is the duplicate-email index, which the
+  // old in-memory check answered with the same 409 and message.
+  if (error && typeof error === 'object' && (error as { code?: string }).code === '23505') {
+    const constraint = (error as { constraint?: string }).constraint;
+    return res.status(409).json({
+      error: constraint === 'clients_workspace_email_key'
+        ? 'A client with this email already exists'
+        : 'That record already exists',
+    });
   }
   const message = error instanceof Error ? error.message : 'Unexpected server error';
   const status = error && typeof error === 'object' && 'status' in error ? Number(error.status) : 500;
