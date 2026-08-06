@@ -5,3 +5,4 @@ dist-server
 .data
 uploads
 .DS_Store
+.superpowers
