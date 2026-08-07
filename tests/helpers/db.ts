@@ -30,7 +30,7 @@ export async function withTestDatabase(): Promise<pg.Pool> {
 }
 
 const TABLES = [
-  'notifications', 'activities', 'review_tokens', 'decisions', 'comments',
+  'sessions', 'notifications', 'activities', 'review_tokens', 'decisions', 'comments',
   'revisions', 'milestones', 'projects', 'clients', 'users', 'workspaces',
 ];
 

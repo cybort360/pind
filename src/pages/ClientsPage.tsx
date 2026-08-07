@@ -5,6 +5,7 @@ import type { AppState } from '@shared/types';
 import { useApp } from '../state';
 import { api, relativeDate } from '../lib';
 import { Modal } from '../components/Modal';
+import { FieldError } from '../components/FieldError';
 
 export function ClientsPage() {
   const { state, setState, notify } = useApp();
@@ -30,9 +31,25 @@ function AddClientModal({ open, onClose, onCreated }: { open: boolean; onClose: 
   const { notify } = useApp();
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({ name: '', company: '', email: '' });
+  const [errors, setErrors] = useState<{ name?: string; company?: string; email?: string }>({});
+
+  function update(field: keyof typeof form, value: string) {
+    setForm((current) => ({ ...current, [field]: value }));
+    setErrors((current) => ({ ...current, [field]: undefined }));
+  }
+
+  function validate() {
+    const next: typeof errors = {};
+    if (form.name.trim().length < 2) next.name = 'Enter the contact name.';
+    if (form.company.trim().length < 2) next.company = 'Enter the company name.';
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) next.email = 'Enter a complete email address.';
+    setErrors(next);
+    return Object.keys(next).length === 0;
+  }
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
+    if (!validate()) return;
     setSaving(true);
     try {
       const next = await api<AppState>('/api/clients', {
@@ -42,6 +59,7 @@ function AddClientModal({ open, onClose, onCreated }: { open: boolean; onClose: 
       });
       onCreated(next);
       setForm({ name: '', company: '', email: '' });
+      setErrors({});
       onClose();
     } catch (error) {
       notify('Could not add client', error instanceof Error ? error.message : 'Try again.', 'error');
@@ -50,5 +68,5 @@ function AddClientModal({ open, onClose, onCreated }: { open: boolean; onClose: 
     }
   }
 
-  return <Modal open={open} onClose={onClose} title="Add a client" eyebrow="New relationship"><form className="form-stack" onSubmit={submit}><div className="form-grid"><label className="field"><span>Contact name</span><input value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} placeholder="Amina Bello" required /></label><label className="field"><span>Company</span><input value={form.company} onChange={(event) => setForm({ ...form, company: event.target.value })} placeholder="Common Ground" required /></label></div><label className="field"><span>Email address</span><input type="email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} placeholder="amina@commonground.example" required /></label><div className="modal__footer"><button type="button" className="button button--ghost" onClick={onClose}>Cancel</button><button className="button button--primary" disabled={saving}>{saving ? 'Adding…' : 'Add client'}</button></div></form></Modal>;
+  return <Modal open={open} onClose={onClose} title="Add a client" eyebrow="New relationship"><form className="form-stack" onSubmit={submit} noValidate><div className="form-grid"><label className="field"><span>Contact name</span><input value={form.name} onChange={(event) => update('name', event.target.value)} placeholder="Amina Bello" aria-invalid={Boolean(errors.name)} aria-describedby={errors.name ? 'add-client-name-error' : undefined} /><FieldError id="add-client-name-error" message={errors.name} /></label><label className="field"><span>Company</span><input value={form.company} onChange={(event) => update('company', event.target.value)} placeholder="Common Ground" aria-invalid={Boolean(errors.company)} aria-describedby={errors.company ? 'add-client-company-error' : undefined} /><FieldError id="add-client-company-error" message={errors.company} /></label></div><label className="field"><span>Email address</span><input type="email" value={form.email} onChange={(event) => update('email', event.target.value)} placeholder="amina@commonground.example" aria-invalid={Boolean(errors.email)} aria-describedby={errors.email ? 'add-client-email-error' : undefined} /><FieldError id="add-client-email-error" message={errors.email} /></label><div className="modal__footer"><button type="button" className="button button--ghost" onClick={onClose}>Cancel</button><button className="button button--primary" disabled={saving}>{saving ? 'Adding…' : 'Add client'}</button></div></form></Modal>;
 }

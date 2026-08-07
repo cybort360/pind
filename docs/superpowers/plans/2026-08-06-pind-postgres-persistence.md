@@ -67,7 +67,7 @@
 - [x] **Step 1: Initialise git so this work is tracked**
 
 ```bash
-cd /Users/user/Documents/pind
+cd "$PROJECT_ROOT"
 git init
 git add -A
 git commit -m "chore: baseline before postgres persistence work"

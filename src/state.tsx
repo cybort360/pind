@@ -5,13 +5,55 @@ import { api } from './lib';
 
 type Toast = { id: number; title: string; detail?: string; tone?: 'success' | 'error' | 'info' };
 
+export interface SetupInput {
+  name: string;
+  shortName: string;
+  logoText: string;
+  accent: string;
+  surface: 'warm' | 'cool' | 'paper';
+  portalHeadline: string;
+  approvalDisclaimer: string;
+  emailFromName: string;
+  ownerName: string;
+  email: string;
+  ownerPassword: string;
+  loadDemoData: boolean;
+}
+
+interface AuthStatus {
+  configured: boolean;
+  authenticated: boolean;
+  demo: boolean;
+}
+
+export interface AppConfig {
+  app: { name: string; tagline: string; description: string };
+  projectCategories: { id: string; label: string }[];
+  deliverableKinds: { id: string; label: string }[];
+  approvalWording: {
+    approvedTitle: string; approvedDetail: string;
+    changesTitle: string; changesDetail: string;
+  };
+  features: {
+    requireClientName: boolean; allowDownloads: boolean; showRevisionHistory: boolean;
+    cloudinary: boolean; resend: boolean; slack: boolean;
+  };
+}
+
 interface AppContextValue {
   state: AppState | null;
   loading: boolean;
   error: string | null;
+  auth: AuthStatus;
+  config: AppConfig | null;
   toasts: Toast[];
   setState: React.Dispatch<React.SetStateAction<AppState | null>>;
   refresh: () => Promise<void>;
+  refreshAuth: () => Promise<AuthStatus>;
+  setupWorkspace: (input: SetupInput) => Promise<AppState>;
+  login: (email: string, password: string) => Promise<AppState>;
+  logout: () => Promise<void>;
+  enterDemo: () => Promise<AppState>;
   notify: (title: string, detail?: string, tone?: Toast['tone']) => void;
   dismissToast: (id: number) => void;
   updateSettings: (settings: WorkspaceSettings) => Promise<void>;
@@ -26,6 +68,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [state, setState] = useState<AppState | null>(null);
   const [loading, setLoading] = useState(!isScopedReview);
   const [error, setError] = useState<string | null>(null);
+  const [auth, setAuth] = useState<AuthStatus>({ configured: false, authenticated: false, demo: false });
+  const [config, setConfig] = useState<AppConfig | null>(null);
   const [toasts, setToasts] = useState<Toast[]>([]);
 
   const notify = useCallback((title: string, detail?: string, tone: Toast['tone'] = 'success') => {
@@ -36,6 +80,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const dismissToast = useCallback((id: number) => {
     setToasts((items) => items.filter((item) => item.id !== id));
+  }, []);
+
+  const refreshAuth = useCallback(async (): Promise<AuthStatus> => {
+    const result = await api<AuthStatus>('/api/auth/status');
+    setAuth(result);
+    return result;
   }, []);
 
   const refresh = useCallback(async () => {
@@ -50,22 +100,74 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
+  const adoptState = useCallback((next: AppState) => {
+    setState(next);
+    setAuth((current) => ({ ...current, authenticated: true }));
+  }, []);
+
+  const setupWorkspace = useCallback(async (input: SetupInput) => {
+    const next = await api<AppState>('/api/auth/setup', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(input),
+    });
+    adoptState(next);
+    setLoading(false);
+    return next;
+  }, [adoptState]);
+
+  const login = useCallback(async (email: string, password: string) => {
+    const next = await api<AppState>('/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password }),
+    });
+    adoptState(next);
+    setLoading(false);
+    return next;
+  }, [adoptState]);
+
+  const logout = useCallback(async () => {
+    await api('/api/auth/logout', { method: 'POST' }).catch(() => undefined);
+    setState(null);
+    setAuth((current) => ({ ...current, authenticated: false, demo: false }));
+  }, []);
+
+  const enterDemo = useCallback(async () => {
+    const next = await api<AppState>('/api/auth/demo', { method: 'POST' });
+    adoptState(next);
+    setLoading(false);
+    return next;
+  }, [adoptState]);
+
   useEffect(() => {
     if (isScopedReview) {
       setLoading(false);
       return;
     }
-    if (!state) {
+    let active = true;
+    void (async () => {
       setLoading(true);
-      void refresh();
-    }
-  }, [isScopedReview, location.pathname, refresh, state]);
+      const status = await refreshAuth().catch(() => ({ configured: false, authenticated: false, demo: false }));
+      if (!active) return;
+      if (status.authenticated) {
+        await refresh();
+      } else {
+        setLoading(false);
+      }
+    })();
+    return () => { active = false; };
+  }, [isScopedReview, location.pathname, refresh, refreshAuth]);
 
   useEffect(() => {
     if (!state) return;
     document.documentElement.style.setProperty('--accent', state.workspace.accent);
     document.documentElement.dataset.surface = state.workspace.surface;
   }, [state]);
+
+  useEffect(() => {
+    api<AppConfig>('/api/config').then(setConfig).catch(() => undefined);
+  }, []);
 
   const updateSettings = useCallback(
     async (settings: WorkspaceSettings) => {
@@ -83,12 +185,17 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const resetDemo = useCallback(async () => {
     const next = await api<AppState>('/api/demo/reset', { method: 'POST' });
     setState(next);
-    notify('Demo restored', 'The original Northstar workspace is back.');
+    notify('Sample data restored', 'The original demo workspace is back.');
   }, [notify]);
 
   const value = useMemo(
-    () => ({ state, loading, error, toasts, setState, refresh, notify, dismissToast, updateSettings, resetDemo }),
-    [state, loading, error, toasts, refresh, notify, dismissToast, updateSettings, resetDemo],
+    () => ({
+      state, loading, error, auth, config, toasts, setState, refresh, refreshAuth,
+      setupWorkspace, login, logout, enterDemo, notify, dismissToast,
+      updateSettings, resetDemo,
+    }),
+    [state, loading, error, auth, config, toasts, refresh, refreshAuth, setupWorkspace,
+     login, logout, enterDemo, notify, dismissToast, updateSettings, resetDemo],
   );
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;

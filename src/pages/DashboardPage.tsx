@@ -23,6 +23,12 @@ export function DashboardPage() {
   const hour = now.getHours();
   const greeting = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
   const decisionsNeeded = state.projects.filter((project) => project.status === 'in-review' || project.status === 'changes-requested').length;
+  const projectsDueThisWeek = state.projects.filter((project) => {
+    const due = new Date(project.dueAt);
+    const endOfWeek = new Date(now);
+    endOfWeek.setDate(endOfWeek.getDate() + 7);
+    return project.status !== 'approved' && due >= now && due <= endOfWeek;
+  }).length;
 
   const nextProject = [...state.projects]
     .filter((project) => project.status !== 'approved')
@@ -33,22 +39,22 @@ export function DashboardPage() {
       <section className="page-intro page-intro--split">
         <div>
           <div className="eyebrow">{formatDate(now.toISOString(), 'EEEE, MMMM d')}</div>
-          <h2>{greeting}, Maya.</h2>
+          <h2>{greeting}, {state.owner?.name?.split(' ')[0] ?? 'there'}.</h2>
           <p>{decisionsNeeded ? `${decisionsNeeded} client ${decisionsNeeded === 1 ? 'decision needs' : 'decisions need'} attention.` : 'No client decisions are waiting. Everything is moving.'}</p>
         </div>
         <button className="button button--primary" onClick={() => setNewProjectOpen(true)}><Plus size={17} /> New project</button>
       </section>
 
       <section className="metric-grid">
-        <article className="metric-card"><span className="metric-card__icon"><FolderKanban size={18} /></span><div><small>Active projects</small><strong>{metrics.active}</strong><em><TrendingUp size={13} /> 2 due this week</em></div></article>
+        <article className="metric-card"><span className="metric-card__icon"><FolderKanban size={18} /></span><div><small>Active projects</small><strong>{metrics.active}</strong><em><TrendingUp size={13} /> {projectsDueThisWeek ? `${projectsDueThisWeek} due ${projectsDueThisWeek === 1 ? 'this week' : 'in 7 days'}` : 'nothing due this week'}</em></div></article>
         <article className="metric-card"><span className="metric-card__icon"><Clock3 size={18} /></span><div><small>Awaiting review</small><strong>{metrics.awaiting}</strong><em>Client links are live</em></div></article>
         <article className="metric-card"><span className="metric-card__icon"><MessageSquare size={18} /></span><div><small>Open comments</small><strong>{metrics.comments}</strong><em>Across {state.projects.filter((project) => project.comments.some((comment) => comment.status === 'open')).length} projects</em></div></article>
-        <article className="metric-card"><span className="metric-card__icon"><CheckCircle2 size={18} /></span><div><small>Approval rate</small><strong>{metrics.approvalRate}%</strong><em>{metrics.approved} approved project</em></div></article>
+        <article className="metric-card"><span className="metric-card__icon"><CheckCircle2 size={18} /></span><div><small>Approval rate</small><strong>{metrics.approvalRate}%</strong><em>{metrics.approved} approved {metrics.approved === 1 ? 'project' : 'projects'}</em></div></article>
       </section>
 
       {nextProject && (
         <section className="attention-card">
-          <div className="attention-card__visual"><img src={nextProject.cover} alt="" /></div>
+          <div className="attention-card__visual"><img src={nextProject.cover} alt={`${nextProject.name} cover`} /></div>
           <div className="attention-card__copy">
             <div className="eyebrow">Needs attention</div>
             <h3>{nextProject.name}</h3>

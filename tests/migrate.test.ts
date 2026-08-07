@@ -18,22 +18,24 @@ describe('migrations', () => {
     for (const table of [
       'activities', 'clients', 'comments', 'decisions', 'milestones',
       'notifications', 'projects', 'review_tokens', 'revisions',
-      'schema_migrations', 'users', 'workspaces',
+      'schema_migrations', 'sessions', 'users', 'workspaces',
     ]) {
       expect(names).toContain(table);
     }
   });
 
   it('records one row per migration file', async () => {
-    const result = await pool.query<{ version: number }>('SELECT version FROM schema_migrations ORDER BY version');
-    expect(result.rows).toEqual([{ version: 1 }]);
+    const result = await pool.query<{ version: number }>(
+      'SELECT version FROM schema_migrations ORDER BY version',
+    );
+    expect(result.rows).toEqual([{ version: 1 }, { version: 2 }]);
   });
 
   it('is a no-op when run again', async () => {
     const applied = await runMigrations(pool);
     expect(applied).toBe(0);
     const result = await pool.query('SELECT COUNT(*)::int AS count FROM schema_migrations');
-    expect(result.rows[0].count).toBe(1);
+    expect(result.rows[0].count).toBe(2);
   });
 
   it('drops the legacy JSONB state table', async () => {

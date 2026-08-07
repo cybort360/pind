@@ -20,7 +20,7 @@ import {
   X,
 } from 'lucide-react';
 import { Link, useParams } from 'react-router-dom';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { AppState, Comment, Revision } from '@shared/types';
 import { useApp } from '../state';
 import { api, cn, formatDate, relativeDate } from '../lib';
@@ -41,6 +41,7 @@ export function ProjectPage() {
   const [inviteOpen, setInviteOpen] = useState(false);
   const [receiptOpen, setReceiptOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
+  const [resolveTarget, setResolveTarget] = useState<Comment | null>(null);
   const [saving, setSaving] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -71,6 +72,7 @@ export function ProjectPage() {
 
   async function addComment() {
     if (!selectedRevision || !commentBody.trim()) return;
+    const authorName = state!.owner?.name ?? 'Studio';
     setSaving(true);
     try {
       const next = await api<AppState>(`/api/projects/${stableProjectId}/comments`, {
@@ -78,7 +80,7 @@ export function ProjectPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           revisionId: selectedRevision.id,
-          author: 'Maya Okeke',
+          author: authorName,
           authorRole: 'studio',
           body: commentBody,
           x: pinDraft?.x,
@@ -96,11 +98,9 @@ export function ProjectPage() {
     }
   }
 
-  async function resolveComment(comment: Comment) {
-    const reply = window.prompt('Add a short resolution note:', comment.reply ?? 'Updated in the latest revision.');
-    if (reply === null) return;
+  async function resolveComment(id: string, reply: string) {
     try {
-      const next = await api<AppState>(`/api/comments/${comment.id}/resolve`, {
+      const next = await api<AppState>(`/api/comments/${id}/resolve`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ reply }),
@@ -123,6 +123,15 @@ export function ProjectPage() {
     const x = ((event.clientX - rect.left) / rect.width) * 100;
     const y = ((event.clientY - rect.top) / rect.height) * 100;
     setPinDraft({ x, y });
+    setCommentBody('');
+  }
+
+  function onCanvasKeyDown(event: React.KeyboardEvent<HTMLDivElement>) {
+    if (event.key !== 'Enter' && event.key !== ' ') return;
+    event.preventDefault();
+    if (!selectedRevision) return;
+    const rect = event.currentTarget.getBoundingClientRect();
+    setPinDraft({ x: 50, y: 50 });
     setCommentBody('');
   }
 
@@ -163,9 +172,9 @@ export function ProjectPage() {
             {selectedRevision ? (
               <div className="artboard-wrap">
                 <div className="artboard-instruction"><MessageSquare size={14} /> Click anywhere on the work to pin feedback</div>
-                <div className="artboard" onClick={onCanvasClick} role="button" tabIndex={0}>
+                <div className="artboard" onClick={onCanvasClick} onKeyDown={onCanvasKeyDown} role="button" tabIndex={0} aria-label="Artwork. Press Enter or Space to add a feedback pin, or click to place one at that point.">
                   {selectedRevision.kind === 'image' || selectedRevision.thumbnail ? <img src={selectedRevision.thumbnail ?? selectedRevision.fileUrl} alt={selectedRevision.label} /> : <div className="file-preview"><File size={42} /><strong>{selectedRevision.fileName}</strong><span>{selectedRevision.kind.toUpperCase()} · {selectedRevision.sizeLabel}</span><a href={selectedRevision.fileUrl}>Open file</a></div>}
-                  {visibleComments.filter((comment) => comment.x !== undefined && comment.y !== undefined).map((comment) => <button key={comment.id} title={comment.body} className={cn('pin', comment.status === 'resolved' && 'pin--resolved')} style={{ left: `${comment.x}%`, top: `${comment.y}%` }} onClick={(event) => event.stopPropagation()}>{pinnedCommentNumbers.get(comment.id)}</button>)}
+                  {visibleComments.filter((comment) => comment.x !== undefined && comment.y !== undefined).map((comment) => <button key={comment.id} aria-label={`Comment ${pinnedCommentNumbers.get(comment.id)}: ${comment.body}`} title={comment.body} className={cn('pin', comment.status === 'resolved' && 'pin--resolved')} style={{ left: `${comment.x}%`, top: `${comment.y}%` }} onClick={(event) => { event.stopPropagation(); document.getElementById(`comment-${comment.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }); }}>{pinnedCommentNumbers.get(comment.id)}</button>)}
                   {pinDraft && <span className="pin pin--draft" style={{ left: `${pinDraft.x}%`, top: `${pinDraft.y}%` }}>+</span>}
                 </div>
                 <div className="revision-note"><strong>Revision note</strong><p>{selectedRevision.note || 'No note was added to this revision.'}</p></div>
@@ -180,16 +189,16 @@ export function ProjectPage() {
             <div className="summary-card"><span><Sparkles size={15} /></span><div><strong>Revision brief</strong><p>{revisionSummary}</p></div></div>
             <div className="comments-list">
               {visibleComments.map((comment) => (
-                <article className={cn('comment-card', comment.status === 'resolved' && 'comment-card--resolved')} key={comment.id}>
+                <article id={`comment-${comment.id}`} className={cn('comment-card', comment.status === 'resolved' && 'comment-card--resolved')} key={comment.id}>
                   <div className="comment-card__top"><Avatar name={comment.author} size="sm" /><div><strong>{comment.author}</strong><span>{comment.authorRole === 'client' ? 'Client' : 'Studio'} · {relativeDate(comment.createdAt)}</span></div>{pinnedCommentNumbers.has(comment.id) && <em>{pinnedCommentNumbers.get(comment.id)}</em>}</div>
                   <p>{comment.body}</p>
-                  {comment.reply && <div className="comment-reply"><span className="avatar avatar--sm">MO</span><p><strong>Maya</strong>{comment.reply}</p></div>}
-                  <div className="comment-card__foot">{comment.status === 'open' ? <button onClick={() => void resolveComment(comment)}><Check size={14} /> Mark resolved</button> : <span><CheckCircle2 size={14} /> Resolved {comment.resolvedAt ? relativeDate(comment.resolvedAt) : ''}</span>}</div>
+                  {comment.reply && <div className="comment-reply"><Avatar name={state.owner?.name ?? 'Studio'} size="sm" /><p><strong>{state.owner?.name ?? 'Studio'}</strong>{comment.reply}</p></div>}
+                  <div className="comment-card__foot">{comment.status === 'open' ? <button onClick={() => setResolveTarget(comment)}><Check size={14} /> Mark resolved</button> : <span><CheckCircle2 size={14} /> Resolved {comment.resolvedAt ? relativeDate(comment.resolvedAt) : ''}</span>}</div>
                 </article>
               ))}
               {!visibleComments.length && <div className="comments-empty"><MessageSquare size={20} /><strong>No feedback here yet.</strong><span>Click the artwork or write a general comment below.</span></div>}
             </div>
-            {selectedRevision && <div className="comment-composer">{pinDraft && <div className="pin-context"><span>+</span> New pin at {Math.round(pinDraft.x)}%, {Math.round(pinDraft.y)}%<button onClick={() => setPinDraft(null)}><X size={13} /></button></div>}<textarea rows={3} placeholder={pinDraft ? 'Describe what should change at this point…' : 'Add a general note for this revision…'} value={commentBody} onChange={(event) => setCommentBody(event.target.value)} /><div><span>Commenting as Maya</span><button className="button button--primary button--compact" onClick={() => void addComment()} disabled={!commentBody.trim() || saving}>{saving ? 'Adding…' : <><Send size={14} /> Add comment</>}</button></div></div>}
+            {selectedRevision && <div className="comment-composer">{pinDraft && <div className="pin-context"><span>+</span> New pin at {Math.round(pinDraft.x)}%, {Math.round(pinDraft.y)}%<button onClick={() => setPinDraft(null)}><X size={13} /></button></div>}<textarea rows={3} placeholder={pinDraft ? 'Describe what should change at this point…' : 'Add a general note for this revision…'} value={commentBody} onChange={(event) => setCommentBody(event.target.value)} /><div><span>Commenting as {state.owner?.name ?? 'Studio'}</span><button className="button button--primary button--compact" onClick={() => void addComment()} disabled={!commentBody.trim() || saving}>{saving ? 'Adding…' : <><Send size={14} /> Add comment</>}</button></div></div>}
           </aside>
         </div>
       )}
@@ -213,6 +222,7 @@ export function ProjectPage() {
       <UploadRevisionModal open={uploadOpen} onClose={() => setUploadOpen(false)} project={project} fileRef={fileRef} />
       <InviteModal open={inviteOpen} onClose={() => setInviteOpen(false)} project={project} reviewUrl={reviewUrl} clientEmail={client?.email ?? ''} />
       <Modal open={receiptOpen} onClose={() => setReceiptOpen(false)} title="Decision record" eyebrow="Audit trail" size="lg">{latestDecision ? <DecisionReceipt project={project} decision={latestDecision} revision={latestDecisionRevision} workspace={state.workspace} /> : <div className="mini-empty"><FileCheck2 size={20} /><span>No receipt is available yet.</span></div>}</Modal>
+      <ResolveDialog comment={resolveTarget} onClose={() => setResolveTarget(null)} onResolve={resolveComment} />
     </div>
   );
 }
@@ -266,4 +276,38 @@ function InviteModal({ open, onClose, project, reviewUrl, clientEmail }: { open:
   }
 
   return <Modal open={open} onClose={onClose} title="Share the client review" eyebrow="Secure project link"><form className="form-stack" onSubmit={send}><label className="field"><span>Client email</span><input type="email" value={email} onChange={(event) => setEmail(event.target.value)} required /></label><label className="field"><span>Message</span><textarea rows={5} value={message} onChange={(event) => setMessage(event.target.value)} /></label><div className="copy-field"><Link2 size={16} /><span>{reviewUrl}</span><button type="button" onClick={() => navigator.clipboard.writeText(reviewUrl)}><Copy size={15} /></button></div><div className="modal__footer"><button type="button" className="button button--ghost" onClick={onClose}>Cancel</button><button className="button button--primary" disabled={sending}>{sending ? 'Preparing…' : <><Send size={15} /> Send invitation</>}</button></div></form></Modal>;
+}
+
+function ResolveDialog({ comment, onClose, onResolve }: { comment: Comment | null; onClose: () => void; onResolve: (id: string, reply: string) => Promise<void> }) {
+  const [reply, setReply] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (comment) setReply(comment.reply ?? 'Updated in the latest revision.');
+  }, [comment]);
+
+  async function submit(event: React.FormEvent) {
+    event.preventDefault();
+    if (!comment) return;
+    setSaving(true);
+    try {
+      await onResolve(comment.id, reply);
+      onClose();
+    } catch {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Modal open={Boolean(comment)} onClose={onClose} title="Resolve feedback" eyebrow="Studio response">
+      {comment && (
+        <form className="form-stack" onSubmit={submit}>
+          <div className="summary-card"><span><MessageSquare size={15} /></span><div><strong>Client feedback</strong><p>{comment.body}</p></div></div>
+          <label className="field"><span>Resolution note</span><textarea rows={3} required maxLength={400} value={reply} onChange={(event) => setReply(event.target.value)} placeholder="Tell the client how this point was handled." /></label>
+          <p className="field-hint">This note is shown to the client in the review portal.</p>
+          <div className="modal__footer"><button type="button" className="button button--ghost" onClick={onClose}>Cancel</button><button className="button button--primary" disabled={!reply.trim() || saving}>{saving ? 'Resolving…' : <><Check size={15} /> Resolve feedback</>}</button></div>
+        </form>
+      )}
+    </Modal>
+  );
 }

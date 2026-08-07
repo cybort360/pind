@@ -5,7 +5,8 @@ import { readAppState, readReviewPayload } from './db/assemble.js';
 import { resetWorkspace } from './db/seed.js';
 
 export interface Repository {
-  mode: 'postgres';
+  readonly mode: 'postgres';
+  readonly pool: pg.Pool;
   read(workspaceId: string): Promise<AppState>;
   readReviewPayload(token: string): Promise<ReviewPayload | null>;
   transaction<T>(fn: (tx: pg.PoolClient) => Promise<T>): Promise<T>;
@@ -13,10 +14,15 @@ export interface Repository {
 }
 
 class PostgresRepository implements Repository {
-  mode = 'postgres' as const;
+  readonly mode = 'postgres' as const;
+  readonly pool: pg.Pool;
+
+  constructor(pool?: pg.Pool) {
+    this.pool = pool ?? getPool();
+  }
 
   async read(workspaceId: string): Promise<AppState> {
-    const state = await readAppState(getPool(), workspaceId);
+    const state = await readAppState(this.pool, workspaceId);
     if (!state) {
       const error = new Error(`Workspace ${workspaceId} was not found`) as Error & { status?: number };
       error.status = 404;
@@ -26,12 +32,12 @@ class PostgresRepository implements Repository {
   }
 
   readReviewPayload(token: string): Promise<ReviewPayload | null> {
-    return readReviewPayload(getPool(), token);
+    return readReviewPayload(this.pool, token);
   }
 
   /** Runs fn inside a real transaction, rolling back on any rejection. */
   async transaction<T>(fn: (tx: pg.PoolClient) => Promise<T>): Promise<T> {
-    const client = await getPool().connect();
+    const client = await this.pool.connect();
     try {
       await client.query('BEGIN');
       const result = await fn(client);
@@ -46,11 +52,11 @@ class PostgresRepository implements Repository {
   }
 
   async reset(workspaceId: string): Promise<AppState> {
-    await resetWorkspace(getPool(), workspaceId);
+    await resetWorkspace(this.pool, workspaceId);
     return this.read(workspaceId);
   }
 }
 
-export function createRepository(): Repository {
-  return new PostgresRepository();
+export function createRepository(pool?: pg.Pool): Repository {
+  return new PostgresRepository(pool);
 }

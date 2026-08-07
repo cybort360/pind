@@ -6,6 +6,7 @@ import {
   ChevronDown,
   FolderKanban,
   LayoutDashboard,
+  LogOut,
   Menu,
   Palette,
   Search,
@@ -36,7 +37,7 @@ const pageTitles: Record<string, string> = {
 };
 
 export function AppShell() {
-  const { state, setState } = useApp();
+  const { state, setState, logout } = useApp();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [workspaceOpen, setWorkspaceOpen] = useState(false);
@@ -51,10 +52,11 @@ export function AppShell() {
         event.preventDefault();
         setSearchOpen(true);
       }
+      if (event.key === 'Escape' && notificationsOpen) setNotificationsOpen(false);
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, []);
+  }, [notificationsOpen]);
 
   const title = useMemo(() => {
     if (pageTitles[location.pathname]) return pageTitles[location.pathname];
@@ -97,21 +99,23 @@ export function AppShell() {
             <span className="brand-mark">P</span>
             <span>Pind</span>
           </NavLink>
-          <button className="icon-button sidebar__close" onClick={() => setMobileOpen(false)}><X size={18} /></button>
+          <button className="icon-button sidebar__close" onClick={() => setMobileOpen(false)} aria-label="Close navigation"><X size={18} /></button>
         </div>
 
-        <button className="workspace-switcher" onClick={() => setWorkspaceOpen((value) => !value)}>
+        <button className="workspace-switcher" onClick={() => setWorkspaceOpen((value) => !value)} aria-expanded={workspaceOpen} aria-haspopup="menu">
           <span className="workspace-switcher__logo">{state.workspace.logoText}</span>
           <span>
             <strong>{state.workspace.shortName}</strong>
-            <small>Creative workspace</small>
+            <small>{state.workspace.name}</small>
           </span>
           <ChevronDown size={16} />
         </button>
         {workspaceOpen && (
-          <div className="workspace-menu">
+          <div className="workspace-menu" role="menu" aria-label="Workspace menu">
             <button onClick={() => { navigate('/app/settings'); setWorkspaceOpen(false); }}><Settings size={15} /> Workspace settings</button>
             <button onClick={() => { navigate('/design-system'); setWorkspaceOpen(false); }}><Palette size={15} /> Design system</button>
+            <div className="workspace-menu__divider" />
+            <button onClick={() => { void logout().then(() => navigate('/login', { replace: true })); setWorkspaceOpen(false); }}><LogOut size={15} /> Sign out</button>
           </div>
         )}
 
@@ -138,35 +142,36 @@ export function AppShell() {
           <NavLink to="/app/settings" className={({ isActive }) => cn('sidebar__link', isActive && 'is-active')}><Settings size={18} /><span>Settings</span></NavLink>
         </div>
         <div className="sidebar__profile">
-          <Avatar name="Maya Okeke" size="sm" />
-          <span><strong>Maya Okeke</strong><small>Workspace owner</small></span>
+          <Avatar name={state.owner?.name ?? state.workspace.name} size="sm" />
+          <span><strong>{state.owner?.name ?? 'Workspace'}</strong><small>{state.owner?.demo ? 'Demo workspace' : 'Workspace owner'}</small></span>
           <button className="icon-button" aria-label="Open workspace settings" onClick={() => navigate('/app/settings')}><ChevronDown size={15} /></button>
         </div>
       </aside>
 
       {mobileOpen && <button className="sidebar-scrim" onClick={() => setMobileOpen(false)} aria-label="Close navigation" />}
 
-      <main className="app-main">
+      <main className="app-main" id="main">
+        <a className="skip-link" href="#page-content">Skip to content</a>
         <header className="topbar">
           <div className="topbar__left">
-            <button className="icon-button topbar__menu" onClick={() => setMobileOpen(true)}><Menu size={20} /></button>
+            <button className="icon-button topbar__menu" onClick={() => setMobileOpen(true)} aria-label="Open navigation"><Menu size={20} /></button>
             <div>
               <div className="topbar__eyebrow">{state.workspace.shortName}</div>
               <h1>{title}</h1>
             </div>
           </div>
           <div className="topbar__actions">
-            <button className="search-trigger" onClick={() => setSearchOpen(true)}>
+            <button className="search-trigger" onClick={() => setSearchOpen(true)} aria-haspopup="dialog" aria-label="Search workspace">
               <Search size={17} /><span>Search anything</span><kbd>⌘ K</kbd>
             </button>
             <div className="popover-anchor">
-              <button className="icon-button icon-button--bordered" onClick={() => setNotificationsOpen((value) => !value)} aria-label="Notifications">
+              <button className="icon-button icon-button--bordered" onClick={() => setNotificationsOpen((value) => !value)} aria-label="Notifications" aria-expanded={notificationsOpen} aria-haspopup="true">
                 <Bell size={18} />
                 {unread > 0 && <span className="notification-dot">{unread}</span>}
               </button>
               {notificationsOpen && (
-                <div className="popover notification-popover">
-                  <div className="popover__header"><strong>Notifications</strong><span>{unread} unread</span></div>
+                <div className="popover notification-popover" role="dialog" aria-label="Notifications">
+                  <div className="popover__header"><strong>Notifications</strong><span>{unread} unread</span><button className="icon-button" onClick={() => setNotificationsOpen(false)} aria-label="Close notifications"><X size={14} /></button></div>
                   <div className="notification-list">
                     {state.notifications.map((item) => (
                       <button key={item.id} className={cn('notification-item', !item.read && 'is-unread')} onClick={() => void markRead(item.id, item.projectId)}>
@@ -181,7 +186,7 @@ export function AppShell() {
             <Avatar name="Maya Okeke" size="sm" />
           </div>
         </header>
-        <div className="page-container"><Outlet /></div>
+        <div className="page-container" id="page-content"><Outlet /></div>
       </main>
       <Modal open={searchOpen} onClose={() => { setSearchOpen(false); setSearchQuery(''); }} title="Search workspace" eyebrow="Command menu" size="lg">
         <div className="command-search">

@@ -14,30 +14,45 @@ import { Link } from 'react-router-dom';
 import { useApp } from '../state';
 
 export function LandingPage() {
-  const { state } = useApp();
-  if (!state) return null;
+  const { state, auth, config } = useApp();
+
+  const appName = config?.app.name ?? 'Pind';
+  const appTagline = config?.app.tagline ?? 'Put feedback where the work is.';
+  const reviewToken = state?.projects[0]?.reviewToken;
 
   return (
     <div className="marketing-page">
       <header className="marketing-nav">
-        <Link to="/" className="brand-lockup brand-lockup--dark"><span className="brand-mark">P</span><span>Pind</span></Link>
+        <Link to="/" className="brand-lockup brand-lockup--dark"><span className="brand-mark">P</span><span>{appName}</span></Link>
         <nav>
           <a href="#workflow">Workflow</a>
           <a href="#template">Template</a>
           <Link to="/design-system">Design system</Link>
         </nav>
-        <Link className="button button--dark" to="/app">Explore demo <ArrowRight size={16} /></Link>
+        {auth.configured ? (
+          <Link className="button button--dark" to="/login">Sign in <ArrowRight size={16} /></Link>
+        ) : (
+          <Link className="button button--dark" to="/setup">Create workspace <ArrowRight size={16} /></Link>
+        )}
       </header>
 
       <main>
         <section className="hero-section">
           <div className="hero-copy">
-            <div className="hero-kicker"><span /> White-label client approval portal</div>
-            <h1>Put feedback<br />where the work is.</h1>
-            <p>Pind gives creative teams one calm place to share revisions, pin precise feedback, capture approval, and hand off the final work.</p>
+            <div className="hero-kicker"><span /> Remixable client review & approval portal</div>
+            <h1>{appTagline.replace('.', '')}<br />where the work is.</h1>
+            <p>{appName} gives creative teams one calm place to share revisions, pin precise feedback, capture approval, and hand off the final work.</p>
             <div className="hero-actions">
-              <Link className="button button--primary button--large" to="/app">Open the workspace <ArrowRight size={17} /></Link>
-              <Link className="button button--outline button--large" to={`/review/${state.projects[0].reviewToken}`}>Enter as a client</Link>
+              {auth.configured ? (
+                <Link className="button button--primary button--large" to="/login">Open your workspace <ArrowRight size={17} /></Link>
+              ) : (
+                <Link className="button button--primary button--large" to="/setup">Create your workspace <ArrowRight size={17} /></Link>
+              )}
+              {reviewToken ? (
+                <Link className="button button--outline button--large" to={`/review/${reviewToken}`}>Enter as a client</Link>
+              ) : (
+                <Link className="button button--outline button--large" to="/design-system">View design system</Link>
+              )}
             </div>
             <div className="hero-proof">
               <span><Check size={15} /> Seeded sample project</span>
@@ -64,7 +79,11 @@ export function LandingPage() {
                   <div className="mini-comments__head"><strong>2 open comments</strong><MessageSquare size={15} /></div>
                   <article><span className="avatar avatar--sm">DO</span><p><strong>Dara</strong>Can we confirm the small origin text still passes print legibility?</p></article>
                   <article className="is-resolved"><span className="avatar avatar--sm">DO</span><p><strong>Dara</strong>The seasonal badge feels balanced now.</p><CheckCircle2 size={15} /></article>
-                  <button>Approve revision <ArrowRight size={14} /></button>
+                  {reviewToken ? (
+                    <Link to={`/review/${reviewToken}`}>Approve revision <ArrowRight size={14} /></Link>
+                  ) : (
+                    <span className="mini-comments__hint">Demo review link appears after setup</span>
+                  )}
                 </div>
               </div>
             </div>
@@ -80,7 +99,7 @@ export function LandingPage() {
         <section className="workflow-section" id="workflow">
           <div className="section-heading">
             <div className="eyebrow">The workflow</div>
-            <h2>From “what did they mean?”<br />to a clean final sign-off.</h2>
+            <h2>From "what did they mean?"<br />to a clean final sign-off.</h2>
             <p>Every screen has a job. Nothing is here merely to decorate the dashboard.</p>
           </div>
           <div className="workflow-grid">
@@ -95,7 +114,7 @@ export function LandingPage() {
             <div className="template-panel__copy">
               <div className="eyebrow">A real Replit template</div>
               <h2>Remix the system, not just the screenshot.</h2>
-              <p>Pind ships with a complete app surface, persistent data, integration adapters, realistic sample projects, and editable brand tokens.</p>
+              <p>{appName} ships with a complete app surface, persistent data, integration adapters, realistic sample projects, and editable brand tokens.</p>
               <ul>
                 <li><LayoutDashboard size={17} /><span><strong>Multi-screen workspace</strong>Dashboard, projects, clients, review portal, activity, settings, and receipts.</span></li>
                 <li><Link2 size={17} /><span><strong>Connected by configuration</strong>PostgreSQL, Resend, Cloudinary, and Slack adapters with graceful fallbacks.</span></li>
@@ -119,10 +138,14 @@ export function LandingPage() {
         <section className="final-cta">
           <span className="brand-mark brand-mark--large">P</span>
           <div><div className="eyebrow">Northstar Creative demo</div><h2>One project. Three revisions.<br />No missing context.</h2></div>
-          <Link to="/app" className="button button--light button--large">Explore Pind <ArrowRight size={17} /></Link>
+          {auth.configured ? (
+            <Link to="/login" className="button button--light button--large">Sign in to explore <ArrowRight size={17} /></Link>
+          ) : (
+            <Link to="/setup" className="button button--light button--large">Create workspace & explore <ArrowRight size={17} /></Link>
+          )}
         </section>
       </main>
-      <footer className="marketing-footer"><span>© 2026 Pind template</span><span>Built for the Replit Buildathon</span><Link to="/app">Open demo</Link></footer>
+      <footer className="marketing-footer"><span>© 2026 {appName} template</span><span>Built for the Replit Buildathon</span><Link to={auth.configured ? '/login' : '/setup'}>{auth.configured ? 'Sign in' : 'Create workspace'}</Link></footer>
     </div>
   );
 }

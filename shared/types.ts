@@ -122,10 +122,17 @@ export interface Notification {
   projectId?: string;
 }
 
+export interface CurrentUser {
+  name: string;
+  email?: string;
+  demo?: boolean;
+}
+
 export interface AppState {
   schemaVersion: number;
   workspace: WorkspaceSettings;
   integrations: IntegrationState;
+  owner?: CurrentUser;
   clients: Client[];
   projects: Project[];
   activities: Activity[];

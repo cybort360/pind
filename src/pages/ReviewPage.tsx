@@ -20,6 +20,7 @@ import { api, cn, formatDate, relativeDate } from '../lib';
 import { Avatar } from '../components/Avatar';
 import { Modal } from '../components/Modal';
 import { DecisionReceipt } from '../components/DecisionReceipt';
+import { FieldError } from '../components/FieldError';
 
 export function ReviewPage() {
   const { token = '' } = useParams();
@@ -35,6 +36,7 @@ export function ReviewPage() {
   const [receiptOpen, setReceiptOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [mobileComments, setMobileComments] = useState(false);
+  const [composerError, setComposerError] = useState('');
 
   useEffect(() => {
     let active = true;
@@ -82,6 +84,11 @@ export function ReviewPage() {
 
   async function addComment() {
     if (!selectedRevision || !commentBody.trim()) return;
+    if (workspace.requireClientName && clientName.trim().length < 2) {
+      setComposerError('Add your name so the studio can credit this feedback.');
+      return;
+    }
+    setComposerError('');
     setSaving(true);
     try {
       const next = await api<ReviewPayload>(`/api/review/${token}/comments`, {
@@ -113,6 +120,15 @@ export function ReviewPage() {
       x: ((event.clientX - rect.left) / rect.width) * 100,
       y: ((event.clientY - rect.top) / rect.height) * 100,
     });
+    setComposerError('');
+    setMobileComments(true);
+  }
+
+  function onCanvasKeyDown(event: React.KeyboardEvent<HTMLDivElement>) {
+    if (event.key !== 'Enter' && event.key !== ' ') return;
+    event.preventDefault();
+    setPinDraft({ x: 50, y: 50 });
+    setComposerError('');
     setMobileComments(true);
   }
 
@@ -138,7 +154,31 @@ export function ReviewPage() {
               {selectedRevision && workspace.allowDownloads && <a href={selectedRevision.fileUrl} download className="button button--outline button--compact"><Download size={15} /> Download</a>}
             </header>
 
-            {selectedRevision ? <div className="client-stage__file-area"><div className="artboard-instruction"><MessageSquare size={14} /> Click the work to leave precise feedback</div><div className="artboard client-artboard" onClick={onCanvasClick}>{selectedRevision.kind === 'image' || selectedRevision.thumbnail ? <img src={selectedRevision.thumbnail ?? selectedRevision.fileUrl} alt={selectedRevision.label} /> : <div className="file-preview"><File size={42} /><strong>{selectedRevision.fileName}</strong><a href={selectedRevision.fileUrl}>Open deliverable</a></div>}{comments.filter((comment) => comment.x !== undefined && comment.y !== undefined).map((comment) => <button key={comment.id} className={cn('pin', comment.status === 'resolved' && 'pin--resolved')} style={{ left: `${comment.x}%`, top: `${comment.y}%` }} onClick={(event) => event.stopPropagation()}>{pinnedCommentNumbers.get(comment.id)}</button>)}{pinDraft && <span className="pin pin--draft" style={{ left: `${pinDraft.x}%`, top: `${pinDraft.y}%` }}>+</span>}</div><div className="client-revision-note"><div><strong>What changed in this version</strong><p>{selectedRevision.note}</p></div><span>V{selectedRevision.version}</span></div></div> : <div className="first-upload"><File size={28} /><h3>No deliverable is ready yet.</h3><p>The studio will notify you when the first revision is uploaded.</p></div>}
+            {selectedRevision ? (
+              <div className="client-stage__file-area">
+                <div className="artboard-instruction"><MessageSquare size={14} /> Click the work to leave precise feedback</div>
+                <div className="artboard client-artboard" onClick={onCanvasClick} onKeyDown={onCanvasKeyDown} role="button" tabIndex={0} aria-label="Artwork. Press Enter or Space to place a feedback pin here.">
+                  {selectedRevision.kind === 'image' || selectedRevision.thumbnail
+                    ? <img src={selectedRevision.thumbnail ?? selectedRevision.fileUrl} alt={selectedRevision.label} />
+                    : <div className="file-preview"><File size={42} /><strong>{selectedRevision.fileName}</strong><a href={selectedRevision.fileUrl}>Open deliverable</a></div>}
+                  {comments.filter((comment) => comment.x !== undefined && comment.y !== undefined).map((comment) => (
+                    <button
+                      key={comment.id}
+                      className={cn('pin', comment.status === 'resolved' && 'pin--resolved')}
+                      aria-label={`Comment ${pinnedCommentNumbers.get(comment.id)}: ${comment.body}`}
+                      title={comment.body}
+                      style={{ left: `${comment.x}%`, top: `${comment.y}%` }}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        document.getElementById(`review-comment-${comment.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                      }}
+                    >{pinnedCommentNumbers.get(comment.id)}</button>
+                  ))}
+                  {pinDraft && <span className="pin pin--draft" style={{ left: `${pinDraft.x}%`, top: `${pinDraft.y}%` }}>+</span>}
+                </div>
+                <div className="client-revision-note"><div><strong>What changed in this version</strong><p>{selectedRevision.note}</p></div><span>V{selectedRevision.version}</span></div>
+              </div>
+            ) : <div className="first-upload"><File size={28} /><h3>No deliverable is ready yet.</h3><p>The studio will notify you when the first revision is uploaded.</p></div>}
           </div>
 
           <aside className={cn('client-comments', mobileComments && 'client-comments--open')}>
@@ -147,7 +187,7 @@ export function ReviewPage() {
               {comments.map((comment) => <ClientComment key={comment.id} comment={comment} pinNumber={pinnedCommentNumbers.get(comment.id)} />)}
               {!comments.length && <div className="comments-empty"><MessageSquare size={20} /><strong>Nothing pinned yet.</strong><span>Click the work to add the first feedback point.</span></div>}
             </div>
-            {selectedRevision && <div className="client-composer">{pinDraft && <div className="pin-context"><span>+</span> Pin at {Math.round(pinDraft.x)}%, {Math.round(pinDraft.y)}%<button onClick={() => setPinDraft(null)}><X size={13} /></button></div>}<label className="field field--compact"><span>Your name</span><input value={clientName} onChange={(event) => setClientName(event.target.value)} /></label><textarea value={commentBody} onChange={(event) => setCommentBody(event.target.value)} rows={4} placeholder={pinDraft ? 'What should change here?' : 'Leave a general note on this revision…'} /><button className="button button--primary" onClick={() => void addComment()} disabled={!commentBody.trim() || saving}>{saving ? 'Adding…' : <><Send size={15} /> Add feedback</>}</button></div>}
+            {selectedRevision && <div className="client-composer">{pinDraft && <div className="pin-context"><span>+</span> Pin at {Math.round(pinDraft.x)}%, {Math.round(pinDraft.y)}%<button onClick={() => setPinDraft(null)}><X size={13} /></button></div>}<label className="field field--compact"><span>Your name</span><input value={clientName} onChange={(event) => setClientName(event.target.value)} required={workspace.requireClientName} /></label><textarea value={commentBody} onChange={(event) => setCommentBody(event.target.value)} rows={4} placeholder={pinDraft ? 'What should change here?' : 'Leave a general note on this revision…'} /><FieldError message={composerError} /><button className="button button--primary" onClick={() => void addComment()} disabled={!commentBody.trim() || saving}>{saving ? 'Adding…' : <><Send size={15} /> Add feedback</>}</button></div>}
           </aside>
         </section>
       </main>
@@ -168,7 +208,7 @@ export function ReviewPage() {
 }
 
 function ClientComment({ comment, pinNumber }: { comment: Comment; pinNumber?: number }) {
-  return <article className={cn('comment-card', comment.status === 'resolved' && 'comment-card--resolved')}><div className="comment-card__top"><Avatar name={comment.author} size="sm" /><div><strong>{comment.author}</strong><span>{comment.authorRole === 'client' ? 'Client' : 'Studio'} · {relativeDate(comment.createdAt)}</span></div>{pinNumber !== undefined && <em>{pinNumber}</em>}</div><p>{comment.body}</p>{comment.reply && <div className="comment-reply"><span className="avatar avatar--sm">MO</span><p><strong>Studio response</strong>{comment.reply}</p></div>}<div className="comment-card__foot">{comment.status === 'resolved' ? <span><CheckCircle2 size={14} /> Resolved</span> : <span className="open-label">Open</span>}</div></article>;
+  return <article id={`review-comment-${comment.id}`} className={cn('comment-card', comment.status === 'resolved' && 'comment-card--resolved')}><div className="comment-card__top"><Avatar name={comment.author} size="sm" /><div><strong>{comment.author}</strong><span>{comment.authorRole === 'client' ? 'Client' : 'Studio'} · {relativeDate(comment.createdAt)}</span></div>{pinNumber !== undefined && <em>{pinNumber}</em>}</div><p>{comment.body}</p>{comment.reply && <div className="comment-reply"><span className="avatar avatar--sm">MO</span><p><strong>Studio response</strong>{comment.reply}</p></div>}<div className="comment-card__foot">{comment.status === 'resolved' ? <span><CheckCircle2 size={14} /> Resolved</span> : <span className="open-label">Open</span>}</div></article>;
 }
 
 function DecisionModal({ type, onClose, token, project, revisionId, clientName, clientEmail, onPayload, onComplete }: { type: DecisionType | null; onClose: () => void; token: string; project: { id: string; name: string }; revisionId: string; clientName: string; clientEmail: string; onPayload: (payload: ReviewPayload) => void; onComplete: () => void }) {
@@ -177,19 +217,38 @@ function DecisionModal({ type, onClose, token, project, revisionId, clientName, 
   const [email, setEmail] = useState(clientEmail);
   const [note, setNote] = useState('');
   const [saving, setSaving] = useState(false);
+  const [errors, setErrors] = useState<{ name?: string; email?: string; note?: string }>({});
 
   useEffect(() => {
     if (!type) return;
     setName(clientName);
     setEmail(clientEmail);
     setNote('');
+    setErrors({});
   }, [type, clientName, clientEmail]);
 
   if (!type) return null;
   const approved = type === 'approved';
 
+  function update(field: 'name' | 'email' | 'note', value: string) {
+    if (field === 'name') setName(value);
+    else if (field === 'email') setEmail(value);
+    else setNote(value);
+    setErrors((current) => ({ ...current, [field]: undefined }));
+  }
+
+  function validate() {
+    const next: typeof errors = {};
+    if (name.trim().length < 2) next.name = 'Enter your name.';
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) next.email = 'Enter a complete email address.';
+    if (!approved && note.trim().length < 2) next.note = 'Summarize what needs to change.';
+    setErrors(next);
+    return Object.keys(next).length === 0;
+  }
+
   async function submit(event: React.FormEvent) {
     event.preventDefault();
+    if (!validate()) return;
     setSaving(true);
     try {
       const next = await api<ReviewPayload>(`/api/review/${token}/decision`, {
@@ -208,5 +267,5 @@ function DecisionModal({ type, onClose, token, project, revisionId, clientName, 
     }
   }
 
-  return <Modal open={Boolean(type)} onClose={onClose} title={approved ? 'Approve this revision' : 'Request another revision'} eyebrow={approved ? 'Final sign-off' : 'Decision note'}><form className="form-stack" onSubmit={submit}><div className={cn('decision-confirmation', approved ? 'is-approval' : 'is-changes')}><span>{approved ? <CheckCircle2 size={22} /> : <MessageSquare size={22} />}</span><div><strong>{approved ? `Approve ${project.name}` : 'Send clear change requests'}</strong><p>{approved ? 'Your decision will be tied to this exact revision and stored as an approval receipt.' : 'Summarize the remaining work so the next revision starts with clear direction.'}</p></div></div><div className="form-grid"><label className="field"><span>Your name</span><input value={name} onChange={(event) => setName(event.target.value)} required /></label><label className="field"><span>Email</span><input type="email" value={email} onChange={(event) => setEmail(event.target.value)} required /></label></div><label className="field"><span>{approved ? 'Optional approval note' : 'What needs to change?'}</span><textarea rows={5} value={note} onChange={(event) => setNote(event.target.value)} required={!approved} placeholder={approved ? 'Approved for production.' : 'List the remaining changes in plain language.'} /></label><div className="modal__footer"><button type="button" className="button button--ghost" onClick={onClose}>Cancel</button><button className={cn('button', approved ? 'button--primary' : 'button--danger')} disabled={saving}>{saving ? 'Capturing…' : approved ? 'Confirm approval' : 'Request changes'}</button></div></form></Modal>;
+  return <Modal open={Boolean(type)} onClose={onClose} title={approved ? 'Approve this revision' : 'Request another revision'} eyebrow={approved ? 'Final sign-off' : 'Decision note'}><form className="form-stack" onSubmit={submit} noValidate><div className={cn('decision-confirmation', approved ? 'is-approval' : 'is-changes')}><span>{approved ? <CheckCircle2 size={22} /> : <MessageSquare size={22} />}</span><div><strong>{approved ? `Approve ${project.name}` : 'Send clear change requests'}</strong><p>{approved ? 'Your decision will be tied to this exact revision and stored as an approval receipt.' : 'Summarize the remaining work so the next revision starts with clear direction.'}</p></div></div><div className="form-grid"><label className="field"><span>Your name</span><input value={name} onChange={(event) => update('name', event.target.value)} aria-invalid={Boolean(errors.name)} aria-describedby={errors.name ? 'decision-name-error' : undefined} /><FieldError id="decision-name-error" message={errors.name} /></label><label className="field"><span>Email</span><input type="email" value={email} onChange={(event) => update('email', event.target.value)} aria-invalid={Boolean(errors.email)} aria-describedby={errors.email ? 'decision-email-error' : undefined} /><FieldError id="decision-email-error" message={errors.email} /></label></div><label className="field"><span>{approved ? 'Optional approval note' : 'What needs to change?'}</span><textarea rows={5} value={note} onChange={(event) => update('note', event.target.value)} required={!approved} placeholder={approved ? 'Approved for production.' : 'List the remaining changes in plain language.'} aria-invalid={Boolean(errors.note)} aria-describedby={errors.note ? 'decision-note-error' : undefined} /><FieldError id="decision-note-error" message={errors.note} /></label><div className="modal__footer"><button type="button" className="button button--ghost" onClick={onClose}>Cancel</button><button className={cn('button', approved ? 'button--primary' : 'button--danger')} disabled={saving}>{saving ? 'Capturing…' : approved ? 'Confirm approval' : 'Request changes'}</button></div></form></Modal>;
 }

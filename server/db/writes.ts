@@ -33,14 +33,21 @@ export async function touchClient(tx: pg.PoolClient, clientId: string): Promise<
   );
 }
 
-/** Loads a project for update, throwing a 404 the error middleware understands. */
+/**
+ * Loads a project for update, throwing a 404 the error middleware understands.
+ * When `workspaceId` is provided the project must belong to that workspace;
+ * this is the authorisation check that keeps every studio mutation scoped to
+ * the authenticated tenant.
+ */
 export async function requireProject(
   tx: pg.PoolClient,
   projectId: string,
+  workspaceId?: string,
 ): Promise<{ id: string; workspace_id: string; client_id: string; name: string; status: Project['status']; progress: number }> {
   const result = await tx.query(
-    `SELECT id, workspace_id, client_id, name, status, progress FROM projects WHERE id = $1 FOR UPDATE`,
-    [projectId],
+    `SELECT id, workspace_id, client_id, name, status, progress FROM projects
+     WHERE id = $1${workspaceId ? ' AND workspace_id = $2' : ''} FOR UPDATE`,
+    workspaceId ? [projectId, workspaceId] : [projectId],
   );
   if (result.rowCount === 0) {
     const error = new Error('Project not found') as Error & { status?: number };

@@ -51,3 +51,24 @@ export const inviteSchema = z.object({
   email: z.string().email(),
   message: z.string().max(500).optional().default(''),
 });
+
+export const loginSchema = z.object({
+  email: z.string().email(),
+  password: z.string().min(8).max(128),
+});
+
+/** First-run workspace setup. The owner password must be at least 8 chars. */
+export const setupSchema = z.object({
+  name: z.string().min(2).max(80),
+  shortName: z.string().min(1).max(30),
+  logoText: z.string().min(1).max(3),
+  accent: z.string().regex(/^#[0-9A-Fa-f]{6}$/),
+  surface: z.enum(['warm', 'cool', 'paper']),
+  portalHeadline: z.string().min(10).max(160),
+  approvalDisclaimer: z.string().min(10).max(300),
+  emailFromName: z.string().min(2).max(80),
+  ownerName: z.string().min(2).max(80),
+  email: z.string().email(),
+  ownerPassword: z.string().min(8).max(128),
+  loadDemoData: z.boolean().optional().default(false),
+});
