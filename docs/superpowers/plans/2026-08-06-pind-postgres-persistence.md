@@ -64,7 +64,7 @@
 - Consumes: nothing.
 - Produces: `getPool(): pg.Pool`, `closePool(): Promise<void>`, `requireDatabaseUrl(): string` from `server/db/pool.ts`.
 
-- [ ] **Step 1: Initialise git so this work is tracked**
+- [x] **Step 1: Initialise git so this work is tracked**
 
 ```bash
 cd /Users/user/Documents/pind
@@ -75,7 +75,7 @@ git commit -m "chore: baseline before postgres persistence work"
 
 Expected: a commit containing the current working tree. `.gitignore` already excludes `node_modules`, `dist`, `dist-server`, `.env`, `.data`, `uploads`.
 
-- [ ] **Step 2: Write the failing test**
+- [x] **Step 2: Write the failing test**
 
 Create `tests/pool.test.ts`:
 
@@ -117,12 +117,12 @@ describe('resolveSsl', () => {
 });
 ```
 
-- [ ] **Step 3: Run test to verify it fails**
+- [x] **Step 3: Run test to verify it fails**
 
 Run: `npx vitest run tests/pool.test.ts`
 Expected: FAIL — `Failed to resolve import "../server/db/pool"`.
 
-- [ ] **Step 4: Write `server/db/pool.ts`**
+- [x] **Step 4: Write `server/db/pool.ts`**
 
 ```ts
 // `pg` is CommonJS and assigns its exports dynamically, so Node's ESM loader
@@ -177,12 +177,12 @@ export async function closePool(): Promise<void> {
 }
 ```
 
-- [ ] **Step 5: Run test to verify it passes**
+- [x] **Step 5: Run test to verify it passes**
 
 Run: `npx vitest run tests/pool.test.ts`
 Expected: PASS, 2 tests.
 
-- [ ] **Step 6: Create `vitest.config.ts`**
+- [x] **Step 6: Create `vitest.config.ts`**
 
 Database tests share one Postgres database, so they must not run in parallel.
 
@@ -198,7 +198,7 @@ export default defineConfig({
 });
 ```
 
-- [ ] **Step 7: Add database scripts to `package.json`**
+- [x] **Step 7: Add database scripts to `package.json`**
 
 Add to `"scripts"`, after `"seed"`:
 
@@ -208,12 +208,12 @@ Add to `"scripts"`, after `"seed"`:
     "db:reset": "tsx server/seed.ts --reset"
 ```
 
-- [ ] **Step 8: Verify the suite still passes**
+- [x] **Step 8: Verify the suite still passes**
 
 Run: `npm run check && npm test`
 Expected: typecheck clean; 10 tests pass (8 existing + 2 new).
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add server/db/pool.ts tests/pool.test.ts vitest.config.ts package.json
@@ -234,7 +234,7 @@ git commit -m "feat(db): add postgres pool with fail-fast DATABASE_URL requireme
 - Consumes: `getPool`, `closePool` from `server/db/pool.ts`.
 - Produces: `runMigrations(pool: pg.Pool): Promise<number>` returning the count of migrations applied this run, from `server/db/migrate.ts`. `withTestDatabase()`, `truncateAll(pool)` from `tests/helpers/db.ts`.
 
-- [ ] **Step 1: Write `server/migrations/001_initial_schema.sql`**
+- [x] **Step 1: Write `server/migrations/001_initial_schema.sql`**
 
 ```sql
 -- Pind initial relational schema. Replaces the single-document JSONB store.
@@ -396,7 +396,7 @@ CREATE TABLE notifications (
 CREATE INDEX notifications_workspace_idx ON notifications (workspace_id, created_at DESC);
 ```
 
-- [ ] **Step 2: Write the failing test**
+- [x] **Step 2: Write the failing test**
 
 Create `tests/helpers/db.ts`:
 
@@ -492,12 +492,12 @@ describe('migrations', () => {
 });
 ```
 
-- [ ] **Step 3: Run test to verify it fails**
+- [x] **Step 3: Run test to verify it fails**
 
 Run: `npx vitest run tests/migrate.test.ts`
 Expected: FAIL — cannot resolve `../server/db/migrate`.
 
-- [ ] **Step 4: Write `server/db/migrate.ts`**
+- [x] **Step 4: Write `server/db/migrate.ts`**
 
 ```ts
 import fs from 'node:fs/promises';
@@ -588,12 +588,12 @@ if (process.argv[1] && import.meta.url === `file://${process.argv[1]}`) {
 }
 ```
 
-- [ ] **Step 5: Run test to verify it passes**
+- [x] **Step 5: Run test to verify it passes**
 
 Run: `npx vitest run tests/migrate.test.ts`
 Expected: PASS, 4 tests. If Postgres is unreachable the failure will name the connection, not the assertions.
 
-- [ ] **Step 6: Verify the CLI works against a real database**
+- [x] **Step 6: Verify the CLI works against a real database**
 
 ```bash
 createdb pind 2>/dev/null || true
@@ -604,7 +604,7 @@ psql -d pind -c "\dt"
 
 Expected: first run prints `Applied migration 001_initial_schema.sql` then `Applied 1 migration(s).`; second prints `Schema already up to date.`; `\dt` lists twelve tables.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add server/db/migrate.ts server/migrations tests/helpers/db.ts tests/migrate.test.ts
@@ -625,7 +625,7 @@ git commit -m "feat(db): add advisory-locked migration runner and initial schema
 - Consumes: `runMigrations`, `getPool`, `closePool`, `withTestDatabase`, `truncateAll`.
 - Produces: `seedWorkspace(pool, options?): Promise<{ inserted: boolean }>` and `resetWorkspace(pool, workspaceId): Promise<void>` from `server/db/seed.ts`; `DEMO_WORKSPACE_ID` constant; `buildSeed(now?: Date): AppState & { workspaceId: string }` from `server/seed-data.ts`.
 
-- [ ] **Step 1: Convert `server/seed-data.ts` to a date-anchored builder**
+- [x] **Step 1: Convert `server/seed-data.ts` to a date-anchored builder**
 
 Wrap the existing literal in a function so timestamps re-anchor at seed time. Replace the module top with:
 
@@ -656,7 +656,7 @@ This is a mechanical move, not a rewrite. Exactly:
 3. Do not alter a single property inside the literal. `isoDaysAgo` / `isoDaysAhead` now resolve to the closure-scoped versions, which is the entire point: dates re-anchor to the `now` argument.
 4. Verify with `git diff --stat server/seed-data.ts` — the line count should be roughly unchanged, and `npx vitest run tests/seed.test.ts` must still pass the four original assertions, since `seedState` is rebuilt with the same fixed date.
 
-- [ ] **Step 2: Write the failing test**
+- [x] **Step 2: Write the failing test**
 
 Append to `tests/seed.test.ts`:
 
@@ -718,12 +718,12 @@ describe('relational seed', () => {
 });
 ```
 
-- [ ] **Step 3: Run test to verify it fails**
+- [x] **Step 3: Run test to verify it fails**
 
 Run: `npx vitest run tests/seed.test.ts`
 Expected: FAIL — cannot resolve `../server/db/seed`.
 
-- [ ] **Step 4: Write `server/db/seed.ts`**
+- [x] **Step 4: Write `server/db/seed.ts`**
 
 ```ts
 import pg from 'pg';
@@ -868,7 +868,7 @@ export async function resetWorkspace(pool: pg.Pool, workspaceId = DEMO_WORKSPACE
 
 Note: `projects.client_id` is `ON DELETE RESTRICT`, but deleting the *workspace* cascades to both `clients` and `projects`, so `resetWorkspace` needs no ordering.
 
-- [ ] **Step 5: Rewrite `server/seed.ts` as the CLI**
+- [x] **Step 5: Rewrite `server/seed.ts` as the CLI**
 
 ```ts
 import 'dotenv/config';
@@ -891,12 +891,12 @@ if (process.argv.includes('--reset')) {
 await closePool();
 ```
 
-- [ ] **Step 6: Run tests to verify they pass**
+- [x] **Step 6: Run tests to verify they pass**
 
 Run: `npx vitest run tests/seed.test.ts`
 Expected: PASS — the 4 original `seedState` assertions plus the 4 new relational ones.
 
-- [ ] **Step 7: Verify idempotency against a real database**
+- [x] **Step 7: Verify idempotency against a real database**
 
 ```bash
 DATABASE_URL=postgres://localhost:5432/pind npm run db:seed
@@ -907,7 +907,7 @@ psql -d pind -c "SELECT (SELECT COUNT(*) FROM projects) AS projects, (SELECT COU
 
 Expected: first run prints `seeded`, the next two print `already present`; counts are exactly `4 | 4 | 5` (3 comments on Summer Packaging + 2 on Autumn Editorial).
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add server/seed-data.ts server/db/seed.ts server/seed.ts tests/seed.test.ts
@@ -927,7 +927,7 @@ git commit -m "feat(db): add idempotent relational seed for the Northstar demo"
 - Consumes: `withTestDatabase`, `truncateAll`, `seedWorkspace`, `DEMO_WORKSPACE_ID`.
 - Produces: `readAppState(db, workspaceId): Promise<AppState | null>` from `server/db/assemble.ts`; `type Queryable = pg.Pool | pg.PoolClient` and row-mapper helpers from `server/db/rows.ts`.
 
-- [ ] **Step 1: Write `server/db/rows.ts`**
+- [x] **Step 1: Write `server/db/rows.ts`**
 
 ```ts
 import type pg from 'pg';
@@ -955,7 +955,7 @@ export function groupBy<T, K extends string>(items: T[], key: (item: T) => K): M
 }
 ```
 
-- [ ] **Step 2: Write the failing test**
+- [x] **Step 2: Write the failing test**
 
 Create `tests/repository.test.ts`:
 
@@ -1029,12 +1029,12 @@ describe('readAppState', () => {
 });
 ```
 
-- [ ] **Step 3: Run test to verify it fails**
+- [x] **Step 3: Run test to verify it fails**
 
 Run: `npx vitest run tests/repository.test.ts`
 Expected: FAIL — cannot resolve `../server/db/assemble`.
 
-- [ ] **Step 4: Write `server/db/assemble.ts`**
+- [x] **Step 4: Write `server/db/assemble.ts`**
 
 ```ts
 import type {
@@ -1235,12 +1235,12 @@ export async function readAppState(db: Queryable, workspaceId: string): Promise<
 export { attachProjectChildren, toWorkspace, toClient };
 ```
 
-- [ ] **Step 5: Run test to verify it passes**
+- [x] **Step 5: Run test to verify it passes**
 
 Run: `npx vitest run tests/repository.test.ts`
 Expected: PASS, 6 tests.
 
-- [ ] **Step 6: Typecheck and commit**
+- [x] **Step 6: Typecheck and commit**
 
 ```bash
 npm run check
@@ -1260,7 +1260,7 @@ git commit -m "feat(db): assemble AppState from relational queries"
 - Consumes: `attachProjectChildren`, `toWorkspace`, `toClient` from Task 4.
 - Produces: `readReviewPayload(db, token): Promise<ReviewPayload | null>`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Append to `tests/repository.test.ts`:
 
@@ -1307,12 +1307,12 @@ describe('readReviewPayload', () => {
 });
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `npx vitest run tests/repository.test.ts -t readReviewPayload`
 Expected: FAIL — `readReviewPayload is not a function`.
 
-- [ ] **Step 3: Add `readReviewPayload` to `server/db/assemble.ts`**
+- [x] **Step 3: Add `readReviewPayload` to `server/db/assemble.ts`**
 
 ```ts
 /**
@@ -1362,12 +1362,12 @@ export async function readReviewPayload(db: Queryable, token: string): Promise<R
 }
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `npx vitest run tests/repository.test.ts`
 Expected: PASS, 11 tests.
 
-- [ ] **Step 5: Typecheck and commit**
+- [x] **Step 5: Typecheck and commit**
 
 ```bash
 npm run check && npm test
@@ -1388,7 +1388,7 @@ git commit -m "feat(db): scope review payload to a single project by token"
 - Consumes: `readAppState`, `readReviewPayload`, `resetWorkspace`, `getPool`.
 - Produces: `createRepository(): Repository` with `read`, `readReviewPayload`, `transaction`, `reset`; and from `server/db/writes.ts`: `addActivity(tx, input)`, `addNotification(tx, input)`, `touchClient(tx, clientId)`, `requireProject(tx, projectId)`, `requireProjectByToken(tx, token)`, `requireRevision(tx, projectId, revisionId)`. Also `mutate(fn)` in `server/index.ts`.
 
-- [ ] **Step 1: Rewrite `server/repository.ts`**
+- [x] **Step 1: Rewrite `server/repository.ts`**
 
 Replace the entire file:
 
@@ -1453,7 +1453,7 @@ export function createRepository(): Repository {
 
 The `FileRepository` class is deleted entirely.
 
-- [ ] **Step 2: Write `server/db/writes.ts`**
+- [x] **Step 2: Write `server/db/writes.ts`**
 
 ```ts
 import type pg from 'pg';
@@ -1548,7 +1548,7 @@ export async function requireRevision(
 }
 ```
 
-- [ ] **Step 3: Delete `updateState` and `writeQueue` from `server/index.ts`**
+- [x] **Step 3: Delete `updateState` and `writeQueue` from `server/index.ts`**
 
 Remove lines 95–110 (the `writeQueue` declaration and the whole `updateState` function). Add near the top, after `const repository = createRepository();`:
 
@@ -1569,7 +1569,7 @@ async function mutate(fn: (tx: pg.PoolClient) => Promise<void>): Promise<AppStat
 
 Add `import type pg from 'pg';` to the import block.
 
-- [ ] **Step 4: Rewrite `POST /api/clients`**
+- [x] **Step 4: Rewrite `POST /api/clients`**
 
 ```ts
 app.post('/api/clients', route(async (req, res) => {
@@ -1595,7 +1595,7 @@ app.post('/api/clients', route(async (req, res) => {
 }));
 ```
 
-- [ ] **Step 5: Rewrite `POST /api/projects`**
+- [x] **Step 5: Rewrite `POST /api/projects`**
 
 ```ts
 app.post('/api/projects', route(async (req, res) => {
@@ -1643,12 +1643,12 @@ app.post('/api/projects', route(async (req, res) => {
 
 Note the old code incremented `client.activeProjects` here. That is now derived, so the increment disappears — the count updates automatically because the new project's status is `draft`.
 
-- [ ] **Step 6: Typecheck**
+- [x] **Step 6: Typecheck**
 
 Run: `npm run check`
 Expected: clean. The remaining routes still reference `updateState`, so fix them in Tasks 7–8 before running the server.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add server/repository.ts server/db/writes.ts server/index.ts
@@ -1666,7 +1666,7 @@ git commit -m "feat(db): move repository and client/project routes onto transact
 - Consumes: `mutate`, `addActivity`, `addNotification`, `touchClient`, `requireProject`, `requireProjectByToken`, `requireRevision`.
 - Produces: nothing new.
 
-- [ ] **Step 1: Rewrite `POST /api/review/:token/comments`**
+- [x] **Step 1: Rewrite `POST /api/review/:token/comments`**
 
 ```ts
 app.post('/api/review/:token/comments', route(async (req, res) => {
@@ -1696,7 +1696,7 @@ app.post('/api/review/:token/comments', route(async (req, res) => {
 }));
 ```
 
-- [ ] **Step 2: Rewrite `POST /api/projects/:id/comments`**
+- [x] **Step 2: Rewrite `POST /api/projects/:id/comments`**
 
 ```ts
 app.post('/api/projects/:id/comments', route(async (req, res) => {
@@ -1729,7 +1729,7 @@ app.post('/api/projects/:id/comments', route(async (req, res) => {
 }));
 ```
 
-- [ ] **Step 3: Rewrite `PATCH /api/comments/:id/resolve`**
+- [x] **Step 3: Rewrite `PATCH /api/comments/:id/resolve`**
 
 ```ts
 app.patch('/api/comments/:id/resolve', route(async (req, res) => {
@@ -1758,7 +1758,7 @@ app.patch('/api/comments/:id/resolve', route(async (req, res) => {
 }));
 ```
 
-- [ ] **Step 4: Rewrite `POST /api/projects/:id/revisions`**
+- [x] **Step 4: Rewrite `POST /api/projects/:id/revisions`**
 
 Keep the existing multer upload and Cloudinary/local fallback block exactly as it is. Replace only the `updateState` call:
 
@@ -1803,12 +1803,12 @@ Keep the existing multer upload and Cloudinary/local fallback block exactly as i
   });
 ```
 
-- [ ] **Step 5: Typecheck**
+- [x] **Step 5: Typecheck**
 
 Run: `npm run check`
 Expected: clean apart from the not-yet-converted decision/invite/settings routes.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add server/index.ts
@@ -1826,7 +1826,7 @@ git commit -m "feat(db): move comment and revision routes onto transactions"
 - Consumes: everything from Tasks 6–7.
 - Produces: nothing new.
 
-- [ ] **Step 1: Extract the shared decision write**
+- [x] **Step 1: Extract the shared decision write**
 
 Both decision routes ran identical logic against different lookups. Add one helper above the routes:
 
@@ -1888,7 +1888,7 @@ async function applyDecision(
 
 Import `DecisionType` from `../shared/types.js`.
 
-- [ ] **Step 2: Rewrite both decision routes**
+- [x] **Step 2: Rewrite both decision routes**
 
 ```ts
 app.post('/api/review/:token/decision', route(async (req, res) => {
@@ -1928,7 +1928,7 @@ app.post('/api/projects/:id/decision', route(async (req, res) => {
 }));
 ```
 
-- [ ] **Step 3: Rewrite the read-only routes**
+- [x] **Step 3: Rewrite the read-only routes**
 
 ```ts
 app.get('/api/health', route(async (_req, res) => {
@@ -1958,7 +1958,7 @@ app.get('/api/review/:token', route(async (req, res) => {
 
 Delete `findProject`, `findReviewProject`, and `toReviewPayload` — all three are now dead.
 
-- [ ] **Step 4: Rewrite invite, settings, notifications, and reset**
+- [x] **Step 4: Rewrite invite, settings, notifications, and reset**
 
 ```ts
 app.post('/api/projects/:id/invite', route(async (req, res) => {
@@ -2033,14 +2033,14 @@ app.post('/api/demo/reset', route(async (_req, res) => {
 }));
 ```
 
-- [ ] **Step 5: Typecheck**
+- [x] **Step 5: Typecheck**
 
 Run: `npm run check`
 Expected: clean, with no remaining references to `updateState`, `findProject`, `findReviewProject`, or `toReviewPayload`.
 
 Verify: `grep -n "updateState\|writeQueue\|findReviewProject\|toReviewPayload" server/index.ts` returns nothing.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add server/index.ts
@@ -2059,7 +2059,7 @@ git commit -m "feat(db): move decision, invite, settings and reset routes onto t
 - Consumes: everything above.
 - Produces: a running application backed by PostgreSQL.
 
-- [ ] **Step 1: Map Postgres error codes in the error middleware**
+- [x] **Step 1: Map Postgres error codes in the error middleware**
 
 Insert before the generic `message`/`status` lines in the existing handler:
 
@@ -2079,7 +2079,7 @@ Insert before the generic `message`/`status` lines in the existing handler:
   }
 ```
 
-- [ ] **Step 2: Replace the boot sequence at the bottom of `server/index.ts`**
+- [x] **Step 2: Replace the boot sequence at the bottom of `server/index.ts`**
 
 ```ts
 async function start(): Promise<void> {
@@ -2103,7 +2103,7 @@ await start();
 
 Add imports: `getPool` from `./db/pool.js`, `runMigrations` from `./db/migrate.js`, `seedWorkspace` from `./db/seed.js`. Delete the old bare `app.listen(...)` call.
 
-- [ ] **Step 3: Update `.env.example`**
+- [x] **Step 3: Update `.env.example`**
 
 Replace the `DATABASE_URL` block:
 
@@ -2121,7 +2121,7 @@ DATABASE_SSL_NO_VERIFY=
 TEST_DATABASE_URL=postgres://localhost:5432/pind_test
 ```
 
-- [ ] **Step 4: Update the README setup section**
+- [x] **Step 4: Update the README setup section**
 
 Under "Local development", before `npm run dev`:
 
@@ -2144,7 +2144,7 @@ npm run db:reset     # wipe and re-seed the demo workspace
 ```
 ````
 
-- [ ] **Step 5: Run the whole suite**
+- [x] **Step 5: Run the whole suite**
 
 ```bash
 npm run check
@@ -2154,7 +2154,7 @@ npm run build
 
 Expected: typecheck clean; all tests pass; build succeeds.
 
-- [ ] **Step 6: Verify migrations and seed from a genuinely empty database**
+- [x] **Step 6: Verify migrations and seed from a genuinely empty database**
 
 ```bash
 dropdb --if-exists pind_verify && createdb pind_verify
@@ -2166,7 +2166,7 @@ psql -d pind_verify -c "SELECT COUNT(*) FROM projects;"
 
 Expected: health reports `"mode":"postgres"` and `"projects":4`; the table holds 4 rows. This proves migrate-and-seed-on-boot works with no manual setup.
 
-- [ ] **Step 7: Drive every workflow end to end**
+- [x] **Step 7: Drive every workflow end to end**
 
 With the dev server running against `pind_verify`, exercise each workflow and
 confirm rows land in Postgres after each one:
@@ -2184,14 +2184,14 @@ confirm rows land in Postgres after each one:
 | Receipt | read the decision | `receipt_code` matches `^PND-[A-Z]*-[A-Z0-9]{6}$` |
 | Reset demo | `POST /api/demo/reset` | counts return to 4 projects / 4 clients / 5 comments |
 
-- [ ] **Step 8: Verify every route in a browser, dev and production**
+- [x] **Step 8: Verify every route in a browser, dev and production**
 
 Load each of `/`, `/app`, `/app/projects`, `/app/projects/:id`, `/app/clients`,
 `/app/activity`, `/app/settings`, `/design-system`, `/review/:token` directly,
 and hard-refresh a deep route in production. Confirm no console errors and that
 seeded data renders.
 
-- [ ] **Step 9: Confirm the fail-fast path**
+- [x] **Step 9: Confirm the fail-fast path**
 
 ```bash
 env -u DATABASE_URL npm start
@@ -2199,7 +2199,7 @@ env -u DATABASE_URL npm start
 
 Expected: exits non-zero printing the three-line setup message; no server starts.
 
-- [ ] **Step 10: Commit**
+- [x] **Step 10: Commit**
 
 ```bash
 git add -A
