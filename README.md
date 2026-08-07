@@ -66,6 +66,40 @@ npm run build   # client + server + bundled migrations
 npm start
 ```
 
+## Deploying to Vercel
+
+Pind can be deployed to Vercel as a serverless function. The `vercel.json` and `api/index.ts` are already configured.
+
+### Prerequisites
+
+- A [Vercel](https://vercel.com) account
+- A PostgreSQL database (Vercel Postgres, Neon, Supabase, or any provider)
+- **Cloudinary** credentials for file uploads (required on Vercel — the serverless filesystem is ephemeral, so local `/uploads` storage does not persist between requests)
+
+### Steps
+
+1. **Push to GitHub** (already done — `cybort360/pind`).
+2. **Import the repo** on [vercel.com/new](https://vercel.com/new).
+3. **Add a Postgres database**:
+   - In the Vercel dashboard, go to **Storage** → **Create Database** → **Postgres**.
+   - Connect it to your project. Vercel injects `POSTGRES_URL`.
+   - In your project **Settings → Environment Variables**, add `DATABASE_URL` and set it to the same value as `POSTGRES_URL`.
+4. **Add Cloudinary** (required for uploads):
+   - Sign up at [cloudinary.com](https://cloudinary.com) (free tier is sufficient).
+   - Add `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, and `CLOUDINARY_API_SECRET` to your Vercel environment variables.
+5. **Add optional integrations**:
+   - `RESEND_API_KEY` + `EMAIL_FROM` for email invitations.
+   - `SLACK_WEBHOOK_URL` for team notifications.
+   - `APP_URL` set to your Vercel deployment URL (e.g., `https://pind.vercel.app`) for correct invite links and CORS.
+   - `SESSION_TTL_DAYS` if you want to change the default 30-day session length.
+6. **Deploy** — Vercel runs `npm run build` automatically and deploys.
+
+### Important notes
+
+- **File uploads require Cloudinary.** Vercel's serverless functions have no persistent filesystem. Without Cloudinary, uploaded revisions will appear to succeed but the files will be lost after the request ends.
+- **Migrations run automatically** on the first request (cold start). Subsequent requests reuse the same connection pool.
+- **The `uploads/` directory** is not served on Vercel. All file URLs come from Cloudinary when configured.
+
 ## Configuration
 
 All runtime configuration is deliberate, documented, and optional.
