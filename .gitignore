@@ -6,3 +6,4 @@ dist-server
 uploads
 .DS_Store
 .superpowers
+.vercel

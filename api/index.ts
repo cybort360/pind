@@ -1,6 +1,6 @@
-import { createApp } from '../server/app';
-import { getPool } from '../server/db/pool';
-import { runMigrations } from '../server/db/migrate';
+import { createApp } from '../dist-server/server/app.js';
+import { getPool } from '../dist-server/server/db/pool.js';
+import { runMigrations } from '../dist-server/server/db/migrate.js';
 
 let appPromise: Promise<any> | null = null;
 
