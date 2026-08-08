@@ -20,6 +20,7 @@ import { useApp } from '../state';
 import { cn, relativeDate } from '../lib';
 import { Avatar } from './Avatar';
 import { Modal } from './Modal';
+import { ThemeToggle } from './ThemeToggle';
 
 const navItems = [
   { to: '/app', label: 'Overview', icon: LayoutDashboard, end: true },
@@ -96,8 +97,8 @@ export function AppShell() {
       <aside className={cn('sidebar', mobileOpen && 'sidebar--open')}>
         <div className="sidebar__brand">
           <NavLink to="/app" className="brand-lockup" onClick={() => setMobileOpen(false)}>
-            <span className="brand-mark">P</span>
-            <span>Pind</span>
+            <span className="brand-mark">{state.workspace.logoText}</span>
+            <span>{state.workspace.shortName}</span>
           </NavLink>
           <button className="icon-button sidebar__close" onClick={() => setMobileOpen(false)} aria-label="Close navigation"><X size={18} /></button>
         </div>
@@ -183,7 +184,8 @@ export function AppShell() {
                 </div>
               )}
             </div>
-            <Avatar name="Maya Okeke" size="sm" />
+            <ThemeToggle />
+            <Avatar name={state.owner?.name ?? state.workspace.name} size="sm" />
           </div>
         </header>
         <div className="page-container" id="page-content"><Outlet /></div>

@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { useApp } from '../state';
+import { ThemeToggle } from '../components/ThemeToggle';
 
 export function LandingPage() {
   const { state, auth, config } = useApp();
@@ -28,6 +29,7 @@ export function LandingPage() {
           <a href="#workflow">Workflow</a>
           <a href="#template">Template</a>
           <Link to="/design-system">Design system</Link>
+          <ThemeToggle />
         </nav>
         {auth.configured ? (
           <Link className="button button--dark" to="/login">Sign in <ArrowRight size={16} /></Link>
@@ -40,7 +42,7 @@ export function LandingPage() {
         <section className="hero-section">
           <div className="hero-copy">
             <div className="hero-kicker"><span /> Remixable client review & approval portal</div>
-            <h1>{appTagline.replace('.', '')}<br />where the work is.</h1>
+            <h1>{appTagline}</h1>
             <p>{appName} gives creative teams one calm place to share revisions, pin precise feedback, capture approval, and hand off the final work.</p>
             <div className="hero-actions">
               {auth.configured ? (

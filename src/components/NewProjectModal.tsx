@@ -102,13 +102,3 @@ export function NewProjectModal({ open, onClose }: { open: boolean; onClose: () 
   );
 }
 
-function initialProjectForm(state: AppState): FormState {
-  return {
-    name: '',
-    clientId: initialClientId(state),
-    category: 'Brand & Packaging',
-    description: '',
-    dueAt: new Date(Date.now() + 10 * 86400000).toISOString().slice(0, 10),
-    budgetLabel: '$3,000',
-  };
-}
